@@ -1,0 +1,30 @@
+# Ignore sensitive files
+install.sh
+
+# Ignore log files
+*.log
+
+# Ignore temporary files
+*.tmp
+*.swp
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore compiled files
+*.o
+*.out
+*.exe
+
+# Ignore node_modules (if applicable)
+node_modules/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore other unnecessary files
+*.bak
+*.old
+*.orig
