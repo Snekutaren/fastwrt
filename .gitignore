@@ -1,5 +1,4 @@
 # Ignore sensitive files
-install.sh
 
 # Ignore log files
 *.log
@@ -28,3 +27,6 @@ __pycache__/
 *.bak
 *.old
 *.orig
+
+# Ignore the external passphrases file
+passphrases

@@ -58,18 +58,21 @@ SSID_IOTWRT="IoTWrt"
 SSID_METAWRT="MetaWrt"
 
 # Option to use pregenerated passphrases
-USE_PREGENERATED_PASSPHRASES=false
+USE_PREGENERATED_PASSPHRASES=true
 
 # Option to use longer passphrases
 PASSPHRASE_LENGTH=24  # Default length for passphrases
 
 # Ensure the logic correctly handles the USE_PREGENERATED_PASSPHRASES variable
+# Check if pregenerated passphrases should be used
 if [ "$USE_PREGENERATED_PASSPHRASES" = "true" ]; then
-  # Use pregenerated passphrases
-  PASSPHRASE_OPENWRT="zJ02QxR2b31JC9BQVEzEq2v/ERap/SaR"
-  PASSPHRASE_CLOSEDWRT="fIq29fTiakmI1grd1FXO7VGFSO8MOVBt"
-  PASSPHRASE_IOTWRT="kjCVuIGHonlGrtwe8zqk2nXsr485V2mp"
-  PASSPHRASE_METAWRT="fXVKvEtcjKRmy9UPoA/TJToxG1nVufIR"
+  if [ -f "passphrases" ]; then
+    # Source passphrases from the external file
+    . ./passphrases
+  else
+    echo "Error: Passphrases file not found. Please create a 'passphrases' file."
+    exit 1
+  fi
 else
   # Generate new random passphrases
   PASSPHRASE_OPENWRT=$(openssl rand -base64 $PASSPHRASE_LENGTH)
@@ -161,32 +164,3 @@ for script in "$SCRIPTS_DIR"/*.sh; do
 done
 
 echo "All scripts executed. Installation complete."
-
-# Modify the sanitize function to replace the original file during Git push
-sanitize_install_sh() {
-  TEMP_FILE="install.sh.sanitized"
-  cp install.sh "$TEMP_FILE"
-  sed -i 's/PASSPHRASE_[A-Z]*="[^"]*"/PASSPHRASE_[A-Z]*="REDACTED"/g' "$TEMP_FILE"
-  mv "$TEMP_FILE" install.sh
-  echo "Sanitized file ready for Git push."
-}
-
-# Check if the script is being run in a GitHub environment
-if [ "$GITHUB_ACTIONS" = "true" ]; then
-  echo "Sanitizing install.sh for GitHub..."
-  sanitize_install_sh
-fi
-
-# Restore the original file after Git push
-restore_original_install_sh() {
-  git checkout -- install.sh
-  echo "Original install.sh restored."
-}
-
-# Add a Git hook to sanitize before push and restore after
-if [ "$GITHUB_ACTIONS" != "true" ]; then
-  echo "Setting up Git hooks for sanitization..."
-  echo -e "#!/bin/sh\n./install.sh sanitize_install_sh" > .git/hooks/pre-push
-  echo -e "#!/bin/sh\n./install.sh restore_original_install_sh" > .git/hooks/post-push
-  chmod +x .git/hooks/pre-push .git/hooks/post-push
-fi
