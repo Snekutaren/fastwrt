@@ -30,3 +30,6 @@ __pycache__/
 
 # Ignore the external passphrases file
 passphrases
+
+# Ignore the external MAC list file
+maclist

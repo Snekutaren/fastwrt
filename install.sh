@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Debugging: Confirm script start
+echo "install.sh script started."
+
 # Allow user to specify WireGuard IP and default zone policies
 WIREGUARD_IP="10.255.0.1"  # Default WireGuard IP
 #
@@ -51,6 +54,15 @@ echo "Exported Core input policy: $CORE_POLICY_IN"
 echo "Exported Core output policy: $CORE_POLICY_OUT"
 echo "Exported Core forward policy: $CORE_POLICY_FORWARD"
 
+# Option to enable WAN6
+ENABLE_WAN6=false
+
+# Export the variable to be used in other scripts
+export ENABLE_WAN6
+
+# Debugging: Log the exported variable
+echo "Exported WAN6 enable option: $ENABLE_WAN6"
+
 # Define SSIDs and their passphrases
 SSID_OPENWRT="OpenWrt"
 SSID_CLOSEDWRT="ClosedWrt"
@@ -63,14 +75,40 @@ USE_PREGENERATED_PASSPHRASES=true
 # Option to use longer passphrases
 PASSPHRASE_LENGTH=24  # Default length for passphrases
 
+# Define the base directory of the script
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Export BASE_DIR to make it available to child scripts
+export BASE_DIR
+
+# Ensure the script runs from its own directory
+cd "$BASE_DIR"
+
+# Debugging: Log the current working directory
+echo "Current working directory: $(pwd)"
+
+# Debugging: Check if the maclist file exists and log its absolute path
+MACLIST_PATH="$BASE_DIR/maclist"
+if [ -f "$MACLIST_PATH" ]; then
+  echo "Maclist file found at: $MACLIST_PATH"
+  # Source the maclist file
+  . "$MACLIST_PATH"
+else
+  echo "Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist' file."
+  exit 1
+fi
+
 # Ensure the logic correctly handles the USE_PREGENERATED_PASSPHRASES variable
 # Check if pregenerated passphrases should be used
+# Debugging: Check if the passphrases file exists and log its absolute path
 if [ "$USE_PREGENERATED_PASSPHRASES" = "true" ]; then
-  if [ -f "passphrases" ]; then
+  echo "Checking for passphrases file in $BASE_DIR..."
+  if [ -f "$BASE_DIR/passphrases" ]; then
+    echo "Passphrases file found at: $BASE_DIR/passphrases"
     # Source passphrases from the external file
-    . ./passphrases
+    . "$BASE_DIR/passphrases"
   else
-    echo "Error: Passphrases file not found. Please create a 'passphrases' file."
+    echo "Error: Passphrases file not found in $BASE_DIR. Please create a 'passphrases' file."
     exit 1
   fi
 else
@@ -104,20 +142,16 @@ echo "Exported SSID and passphrase for IoTWrt: $SSID_IOTWRT / $PASSPHRASE_IOTWRT
 echo "Exported SSID and passphrase for MetaWrt: $SSID_METAWRT / $PASSPHRASE_METAWRT"
 
 # Debugging: Confirm script start
-echo "install.sh script started."
+echo "install.sh script started a long time ago."
 
 # Ensure the script is executed with root privileges
-if [ "$GITHUB_ACTIONS" = "true" ]; then
-  echo "Running in GitHub Actions environment, skipping root check."
-else
   if [ "$(id -u)" -ne 0 ]; then
     echo "Please run as root"
     exit 1
   fi
-fi
 
-# Define the scripts directory
-SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)/scripts"
+# Define the scripts directory using the absolute path from BASE_DIR
+SCRIPTS_DIR="$BASE_DIR/scripts"
 
 # Debugging: Log the resolved value of SCRIPTS_DIR
 echo "Resolved SCRIPTS_DIR: $SCRIPTS_DIR"
@@ -132,9 +166,11 @@ fi
 LOG_FILE="install_$(date +%Y%m%d_%H%M%S).log"
 echo "Logging installation process to $LOG_FILE"
 
-# Replace process substitution with a POSIX-compliant alternative
-# Redirect stdout and stderr to the log file
-exec > "$LOG_FILE" 2>&1
+# Redirect stdout and stderr to both the terminal and the log file
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Debugging: Log the start of the script
+echo "Starting installation process..."
 
 # Debugging: Log the scripts being processed
 echo "Scripts directory: $SCRIPTS_DIR"

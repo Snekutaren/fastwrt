@@ -2,6 +2,31 @@
 
 set -e  # Exit on any error
 
+# Ensure the script runs from its own directory
+cd "$BASE_DIR"
+
+# Debugging: Log the current working directory
+echo "Current working directory: $(pwd)"
+
+# Process the maclist file line by line instead of sourcing it
+MACLIST_PATH="$BASE_DIR/maclist"
+if [ -f "$MACLIST_PATH" ]; then
+  echo "Maclist file found at: $MACLIST_PATH"
+  while IFS= read -r line; do
+    # Process each line of the maclist file
+    echo "Processing line: $line"
+    mac=$(echo "$line" | cut -d',' -f1)
+    ip=$(echo "$line" | cut -d',' -f2)
+    hostname=$(echo "$line" | cut -d',' -f3)
+    ssid=$(echo "$line" | cut -d',' -f4)
+    # Add logic to handle the extracted values as needed
+    echo "MAC: $mac, IP: $ip, Hostname: $hostname, SSID: $ssid"
+  done < "$MACLIST_PATH"
+else
+  echo "Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist' file."
+  exit 1
+fi
+
 # Log the start of the script
 echo "Starting network configuration..."
 
@@ -146,6 +171,33 @@ uci set network.nodes.ipaddr='10.0.20.1'
 uci set network.nodes.netmask='255.255.255.0'
 echo "Nodes interface configured."
 
+# Meta (VLAN 70)
+echo "Configuring meta interface (VLAN 70)..."
+uci set network.meta=interface
+uci set network.meta.device='br-lan.70'
+uci set network.meta.proto='static'
+uci set network.meta.ipaddr='10.0.70.1'
+uci set network.meta.netmask='255.255.255.0'
+echo "Meta interface configured."
+
+# IoT (VLAN 80)
+echo "Configuring IoT interface (VLAN 80)..."
+uci set network.iot=interface
+uci set network.iot.device='br-lan.80'
+uci set network.iot.proto='static'
+uci set network.iot.ipaddr='10.0.80.1'
+uci set network.iot.netmask='255.255.255.0'
+echo "IoT interface configured."
+
+# Guest (VLAN 90)
+echo "Configuring guest interface (VLAN 90)..."
+uci set network.guest=interface
+uci set network.guest.device='br-lan.90'
+uci set network.guest.proto='static'
+uci set network.guest.ipaddr='192.168.90.1'
+uci set network.guest.netmask='255.255.255.0'
+echo "Guest interface configured."
+
 # WAN (VLAN 100)
 echo "Configuring WAN interface (VLAN 100)..."
 uci set network.wan=interface
@@ -153,12 +205,27 @@ uci set network.wan.device='br-wan.100'
 uci set network.wan.proto='dhcp'
 echo "WAN interface configured."
 
-# WAN IPv6 (disabled)
-echo "Configuring WAN IPv6 interface (disabled)..."
-uci set network.wan6=interface
-uci set network.wan6.device='br-wan.100'
-uci set network.wan6.proto='dhcpv6'
-uci set network.wan6.disabled='1'
-echo "WAN IPv6 interface configured (disabled)."
+# WAN IPv6 (VLAN 100, enabled/disabled based on ENABLE_WAN6)
+if [ "$ENABLE_WAN6" = true ]; then
+  echo "Configuring WAN6 interface (VLAN 100, enabled)..."
+  uci set network.wan6=interface
+  uci set network.wan6.device='br-wan.100'
+  uci set network.wan6.proto='dhcpv6'
+  uci set network.wan6.disabled='0'
+  echo "WAN6 configured."
+else
+  echo "Configuring WAN6 interface (VLAN 100, disabled)..."
+  uci set network.wan6.disabled='1'
+fi
 
+# WireGuard Interface
+uci set network.wireguard=interface
+uci set network.wireguard.proto='static'
+uci set network.wireguard.ipaddr="$WIREGUARD_IP"
+uci set network.wireguard.netmask='255.255.255.0'
+uci set network.wireguard.device='wg0'
+echo "WireGuard interface configuration completed successfully."
+
+# Commit the changes
+uci commit network
 echo "Network configuration completed successfully."

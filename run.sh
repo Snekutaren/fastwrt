@@ -1,3 +1,3 @@
 #!/bin/sh
 
-chmod +x ./Firmware/install.sh && ./Firmware/install.sh
+chmod -R +x ./scripts/*.sh && ./install.sh
