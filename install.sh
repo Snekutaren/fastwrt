@@ -1,24 +1,129 @@
 #!/bin/sh
+# Start with most compatible shell to ensure script runs everywhere
+set -e  # Exit on any error
 
-# Debugging: Confirm script start
+# Confirm script start
 echo "install.sh script started."
+
+# Define log file
+LOG_FILE="install_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging installation process to $LOG_FILE"
+
+# Set up logging in a POSIX-compliant way that displays output on both console and log file
+{
+# Ensure the script is executed with root privileges
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Please run as root"
+  exit 1
+fi
+
+# Define the base directory of the script and export it
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+export BASE_DIR
+
+# Log the current working directory
+echo "Current working directory: $(pwd)"
+
+##############################################
+# Shell Selection and Installation Logic
+##############################################
+# Check for existing shells and install if missing
+echo "Checking for enhanced shells (bash/fish)..."
+
+# Function to check if a package is installed
+is_package_installed() {
+  local pkg_name="$1"
+  if command -v opkg >/dev/null 2>&1; then
+    opkg list-installed | grep -q "^$pkg_name "
+    return $?
+  else
+    command -v "$pkg_name" >/dev/null 2>&1
+    return $?
+  fi
+}
+
+# Function to install a package
+install_package() {
+  local pkg_name="$1"
+  echo "Attempting to install $pkg_name..."
+  if command -v opkg >/dev/null 2>&1; then
+    echo "Using opkg to install $pkg_name..."
+    opkg update
+    opkg install "$pkg_name"
+    return $?
+  else
+    echo "Package manager opkg not found. Cannot install $pkg_name."
+    return 1
+  fi
+}
+
+# Determine the best available shell to use
+PREFERRED_SHELL="ash"  # Default fallback shell
+SHELL_CMD="ash"
+
+# Try to use fish, install if missing and possible
+if is_package_installed "fish"; then
+  echo "Fish shell is available."
+  PREFERRED_SHELL="fish"
+elif [ "$FIRMWARE_BUILD" != "true" ]; then  # Only try to install if not building firmware
+  echo "Fish shell not found."
+  if install_package "fish"; then
+    echo "Successfully installed fish shell."
+    PREFERRED_SHELL="fish"
+  else
+    echo "Could not install fish shell, trying bash..."
+  fi
+fi
+
+# If fish not available, try bash
+if [ "$PREFERRED_SHELL" = "ash" ] && is_package_installed "bash"; then
+  echo "Bash shell is available."
+  PREFERRED_SHELL="bash"
+elif [ "$PREFERRED_SHELL" = "ash" ] && [ "$FIRMWARE_BUILD" != "true" ]; then  # Only try to install if not building firmware
+  echo "Bash shell not found."
+  if install_package "bash"; then
+    echo "Successfully installed bash shell."
+    PREFERRED_SHELL="bash"
+  else
+    echo "Could not install bash shell, falling back to ash."
+  fi
+fi
+
+# Set the shell command based on the preferred shell
+case "$PREFERRED_SHELL" in
+  "fish")
+    SHELL_CMD="fish -c"
+    echo "Using fish shell for script execution."
+    ;;
+  "bash")
+    SHELL_CMD="bash"
+    echo "Using bash shell for script execution."
+    ;;
+  *)
+    SHELL_CMD="ash"
+    echo "Using ash shell for script execution."
+    ;;
+esac
+
+# Export the preferred shell for other scripts
+export PREFERRED_SHELL
 
 # Allow user to specify WireGuard IP and default zone policies
 WIREGUARD_IP="10.255.0.1"  # Default WireGuard IP
 #
-WAN_POLICY_IN="DROP"  # Default WAN input policy
-WAN_POLICY_OUT="ACCEPT"  # Default WAN output policy
-WAN_POLICY_FORWARD="DROP"  # Default WAN forward policy
+CORE_POLICY_IN="ACCEPT"  # Default Core input policy
+CORE_POLICY_OUT="ACCEPT"  # Default Core output policy
+CORE_POLICY_FORWARD="REJECT"  # Default Core forward policy
 #
 OTHER_ZONES_POLICY_IN="DROP"  # Default input policy for other zones
 OTHER_ZONES_POLICY_OUT="DROP"  # Default output policy for other zones
 OTHER_ZONES_POLICY_FORWARD="DROP"  # Default forward policy for other zones
 #
-CORE_POLICY_IN="ACCEPT"  # Default Core input policy
-CORE_POLICY_OUT="ACCEPT"  # Default Core output policy
-CORE_POLICY_FORWARD="REJECT"  # Default Core forward policy
+WAN_POLICY_IN="DROP"  # Default WAN input policy
+WAN_POLICY_OUT="ACCEPT"  # Default WAN output policy
+WAN_POLICY_FORWARD="DROP"  # Default WAN forward policy
 
-# Debugging: Log the default values
+# Log the default values
 echo "Default WireGuard IP: $WIREGUARD_IP"
 echo "Default WAN input policy: $WAN_POLICY_IN"
 echo "Default WAN output policy: $WAN_POLICY_OUT"
@@ -30,7 +135,7 @@ echo "Default Core input policy: $CORE_POLICY_IN"
 echo "Default Core output policy: $CORE_POLICY_OUT"
 echo "Default Core forward policy: $CORE_POLICY_FORWARD"
 
-# Pass these values as environment variables to the scripts
+# Pass these values as environment variables to scripts
 export WIREGUARD_IP
 export WAN_POLICY_IN
 export WAN_POLICY_OUT
@@ -56,45 +161,41 @@ echo "Exported Core forward policy: $CORE_POLICY_FORWARD"
 
 # Option to enable WAN6
 ENABLE_WAN6=false
+export ENABLE_WAN6 # export the variable to scripts
+#
+echo "WAN6 enabled: $ENABLE_WAN6"
 
-# Export the variable to be used in other scripts
-export ENABLE_WAN6
+# Option to enable MAC filtering
+ENABLE_MAC_FILTERING=true
+export ENABLE_MAC_FILTERING # export the variable to scripts
+#
+echo "MAC filtering enabled: $ENABLE_MAC_FILTERING"
 
-# Debugging: Log the exported variable
-echo "Exported WAN6 enable option: $ENABLE_WAN6"
 
 # Define SSIDs and their passphrases
-SSID_OPENWRT="OpenWrt"
 SSID_CLOSEDWRT="ClosedWrt"
-SSID_IOTWRT="IoTWrt"
+SSID_OPENWRT="OpenWrt"
 SSID_METAWRT="MetaWrt"
+SSID_IOTWRT="IoTWrt"
+# Export SSIDs as environment variables
+export SSID_OPENWRT
+export SSID_CLOSEDWRT
+export SSID_IOTWRT
+export SSID_METAWRT
 
-# Option to use pregenerated passphrases
+# Option to use pregenerated passphrases and set passphrase length
 USE_PREGENERATED_PASSPHRASES=true
-
-# Option to use longer passphrases
-PASSPHRASE_LENGTH=24  # Default length for passphrases
-
-# Define the base directory of the script
-BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Export BASE_DIR to make it available to child scripts
-export BASE_DIR
-
-# Ensure the script runs from its own directory
-cd "$BASE_DIR"
-
-# Debugging: Log the current working directory
-echo "Current working directory: $(pwd)"
+PASSPHRASE_LENGTH=32
+#
+echo "Using pregenerated passphrases: $USE_PREGENERATED_PASSPHRASES"
+echo "Passphrase length: $PASSPHRASE_LENGTH"
 
 # Debugging: Check if the maclist file exists and log its absolute path
-MACLIST_PATH="$BASE_DIR/maclist"
+MACLIST_PATH="$BASE_DIR/maclist.csv"
 if [ -f "$MACLIST_PATH" ]; then
   echo "Maclist file found at: $MACLIST_PATH"
-  # Source the maclist file
-  . "$MACLIST_PATH"
 else
-  echo "Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist' file."
+  echo "Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist.csv' file."
   exit 1
 fi
 
@@ -119,75 +220,77 @@ else
   PASSPHRASE_METAWRT=$(openssl rand -base64 $PASSPHRASE_LENGTH)
 fi
 
-# Debugging: Log the generated SSIDs and passphrases
-echo "SSID: $SSID_OPENWRT, Passphrase: $PASSPHRASE_OPENWRT"
-echo "SSID: $SSID_CLOSEDWRT, Passphrase: $PASSPHRASE_CLOSEDWRT"
-echo "SSID: $SSID_IOTWRT, Passphrase: $PASSPHRASE_IOTWRT"
-echo "SSID: $SSID_METAWRT, Passphrase: $PASSPHRASE_METAWRT"
+# Password validation
+# Check if the passphrases meet the length requirement
+for passphrase in "$PASSPHRASE_OPENWRT" "$PASSPHRASE_CLOSEDWRT" "$PASSPHRASE_IOTWRT" "$PASSPHRASE_METAWRT"; do
+  if [ ${#passphrase} -lt 8 ]; then
+    echo "Error: Passphrase too short (minimum 8 characters)."
+    exit 1
+  fi
+  if ! echo "$passphrase" | grep -q '[A-Za-z0-9]'; then
+    echo "Error: Passphrase must contain alphanumeric characters."
+    exit 1
+  fi
+done
 
-# Export SSIDs and passphrases as environment variables
-export SSID_OPENWRT
-export SSID_CLOSEDWRT
-export SSID_IOTWRT
-export SSID_METAWRT
+# Export passphrases as environment variables
 export PASSPHRASE_OPENWRT
 export PASSPHRASE_CLOSEDWRT
 export PASSPHRASE_IOTWRT
 export PASSPHRASE_METAWRT
 
-# Debugging: Log the exported variables
+# Log the exported variables
 echo "Exported SSID and passphrase for OpenWrt: $SSID_OPENWRT / $PASSPHRASE_OPENWRT"
 echo "Exported SSID and passphrase for ClosedWrt: $SSID_CLOSEDWRT / $PASSPHRASE_CLOSEDWRT"
 echo "Exported SSID and passphrase for IoTWrt: $SSID_IOTWRT / $PASSPHRASE_IOTWRT"
 echo "Exported SSID and passphrase for MetaWrt: $SSID_METAWRT / $PASSPHRASE_METAWRT"
 
-# Debugging: Confirm script start
-echo "install.sh script started a long time ago."
-
-# Ensure the script is executed with root privileges
-  if [ "$(id -u)" -ne 0 ]; then
-    echo "Please run as root"
-    exit 1
-  fi
-
 # Define the scripts directory using the absolute path from BASE_DIR
 SCRIPTS_DIR="$BASE_DIR/scripts"
-
-# Debugging: Log the resolved value of SCRIPTS_DIR
-echo "Resolved SCRIPTS_DIR: $SCRIPTS_DIR"
-
 # Check if the scripts directory exists
 if [ ! -d "$SCRIPTS_DIR" ]; then
   echo "Scripts directory not found: $SCRIPTS_DIR"
   exit 1
 fi
-
-# Define log file
-LOG_FILE="install_$(date +%Y%m%d_%H%M%S).log"
-echo "Logging installation process to $LOG_FILE"
-
-# Redirect stdout and stderr to both the terminal and the log file
-exec > >(tee -a "$LOG_FILE") 2>&1
-
-# Debugging: Log the start of the script
-echo "Starting installation process..."
-
-# Debugging: Log the scripts being processed
 echo "Scripts directory: $SCRIPTS_DIR"
 echo "Scripts to execute:"
 ls -l "$SCRIPTS_DIR"/*.sh
 
-# Debugging: Log the output of the ls command for matched scripts
-echo "Files matched by glob pattern:"
-ls "$SCRIPTS_DIR"/*.sh 2>/dev/null || echo "No files matched the glob pattern."
-
-# Execute all scripts in the scripts directory
+# Execute all scripts in the scripts directory using the preferred shell
 for script in "$SCRIPTS_DIR"/*.sh; do
   if [ -f "$script" ]; then
     chmod +x "$script"  # Ensure the script is executable
+    
+    # Update shebang line if needed to match the preferred shell (for bash scripts)
+    if [ "$PREFERRED_SHELL" = "bash" ]; then
+      # Backup the original script
+      cp "$script" "${script}.bak"
+      
+      # Update the shebang only if it's not already set to bash
+      if ! grep -q "^#!/bin/bash" "$script"; then
+        sed '1s|^#!/bin/sh|#!/bin/bash|' "${script}.bak" > "$script"
+        chmod +x "$script"
+        echo "Updated shebang to bash in $script"
+      fi
+      
+      # Remove the backup if successful
+      rm "${script}.bak"
+    fi
+    
     # Adjusted logging for alignment
-    echo "Running $script..."
-    "$script"
+    echo "Running $script using $PREFERRED_SHELL..."
+    
+    # Execute based on the preferred shell
+    case "$PREFERRED_SHELL" in
+      "fish")
+        fish -c ". \"$script\""
+        ;;
+      *)
+        # For bash or ash
+        $SHELL_CMD "$script"
+        ;;
+    esac
+    
     if [ $? -eq 0 ]; then
       echo "$script executed successfully."
     else
@@ -200,3 +303,4 @@ for script in "$SCRIPTS_DIR"/*.sh; do
 done
 
 echo "All scripts executed. Installation complete."
+} 2>&1 | tee -a "$LOG_FILE"

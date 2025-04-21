@@ -1,6 +1,8 @@
 #!/bin/sh
-
 set -e  # Exit on any error
+# Ensure the script runs from its own directory
+cd "$BASE_DIR"
+echo "Current working directory: $(pwd)"
 
 # Log the purpose of the script
 echo "Starting Dropbear configuration script to set up SSH access..."

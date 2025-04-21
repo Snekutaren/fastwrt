@@ -33,3 +33,13 @@ passphrases
 
 # Ignore the external MAC list file
 maclist
+maclist.csv
+
+# Ignore the packages file
+packages
+
+# Ignore network documentation
+NETWORK-DOCUMENTATION.md
+
+# Temporarily ignore README.md
+README.md

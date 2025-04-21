@@ -1,6 +1,8 @@
 #!/bin/sh
-
 set -e  # Exit on any error
+# Ensure the script runs from its own directory
+cd "$BASE_DIR"
+echo "Current working directory: $(pwd)"
 
 # Log the purpose of the script
 echo "Starting commit script to finalize and apply all changes..."
@@ -14,7 +16,7 @@ uci commit
 
 # Restart services (order matters)
 /etc/init.d/firewall reload
-/etc/init.d/dnsmasq restart
+/etc/init.d/dnsmasq reload
 /etc/init.d/dropbear restart
 /etc/init.d/network restart
 

@@ -1,17 +1,7 @@
 #!/bin/sh
-
 set -e  # Exit on any error
-
-# Error handling improvements
-trap 'echo "Error occurred during DHCP configuration. Exiting."; exit 1' ERR
-
-# Log the purpose of the script
-echo "Starting DHCP configuration script to set up DHCP and DNS services..."
-
 # Ensure the script runs from its own directory
 cd "$BASE_DIR"
-
-# Debugging: Log the current working directory
 echo "Current working directory: $(pwd)"
 
 # Delete any existing DHCP entries
@@ -55,71 +45,100 @@ uci set dhcp.@dnsmasq[0].ednspacket_max='1232'
 uci set dhcp.@dnsmasq[0].filter_aaaa='0'
 uci set dhcp.@dnsmasq[0].filter_a='0'
 
-# Configure WAN DHCP settings
-echo "Configuring WAN DHCP settings..."
+# Force clients to use router DNS
+echo "Configuring DNS enforcement..."
+uci set dhcp.@dnsmasq[0].localservice='0'  # Allow requests from all networks, not just local
+uci set dhcp.@dnsmasq[0].noresolv='1'  # Don't read /etc/resolv.conf
+uci add_list dhcp.@dnsmasq[0].server='1.1.1.1'  # Cloudflare DNS
+uci add_list dhcp.@dnsmasq[0].server='9.9.9.9'  # Quad9 DNS
+uci add_list dhcp.@dnsmasq[0].server='8.8.8.8'  # Google DNS
+
+# Configure DHCP for all interfaces
+echo "Configuring DHCP pools for all interfaces..."
+# List of interfaces and their subnets - ORDER MATTERS for GUI display order
+INTERFACES="core nexus nodes meta iot guest wireguard wan"
+
+# Process WAN separately first to ensure it comes last in GUI
+echo "Skipping WAN in first pass (will be added last)..."
+
+# Process all non-WAN interfaces in the specified order
+for interface in $INTERFACES; do
+  # Skip WAN in the first pass - we'll add it last
+  if [ "$interface" = "wan" ]; then
+    continue
+  fi
+  
+  echo "Configuring DHCP for $interface interface..."
+  uci set dhcp.$interface=dhcp
+  uci set dhcp.$interface.interface="$interface"
+  uci set dhcp.$interface.start='200'
+  uci set dhcp.$interface.limit='54'  # Adjust to stay within valid range (200-254)
+  uci set dhcp.$interface.leasetime='12h'
+
+  # Special case for wireguard
+  if [ "$interface" = "wireguard" ]; then
+    echo "Special configuration for WireGuard interface"
+    uci set dhcp.$interface.ignore='1'  # Typically WireGuard doesn't need DHCP
+  fi
+
+  # For guest network, configure different DNS to prevent internal network access
+  if [ "$interface" = "guest" ]; then
+    echo "Setting public DNS for guest network"
+    uci add_list dhcp.$interface.dhcp_option='6,8.8.8.8,8.8.4.4'  # Use Google DNS for guests
+  fi
+done
+
+# Now add WAN last to ensure it appears at the end of the list in GUI
+echo "Configuring WAN DHCP settings (added last for GUI order)..."
 uci set dhcp.wan=dhcp
 uci set dhcp.wan.interface='wan'
 uci set dhcp.wan.ignore='1'
 
-# DHCP Pools
-echo "Configuring DHCP pools for zones: core, nexus, nodes..."
-for zone in core nexus nodes; do
-  uci set dhcp.$zone=dhcp
-  uci set dhcp.$zone.interface="$zone"
-  uci set dhcp.$zone.start='200'
-  uci set dhcp.$zone.limit='55'
-  uci set dhcp.$zone.leasetime='12h'
-done
-
 echo "DHCP pool configuration completed successfully."
 
-# Static Leases
-# Removed static lease for rog_eth
-# Removed static lease for e800_eth
-
-echo "Static lease configuration completed successfully."
-
-# Process the maclist file line by line instead of sourcing it
-MACLIST_PATH="$BASE_DIR/maclist"
+# Process maclist.csv for static DHCP leases
+MACLIST_PATH="$BASE_DIR/maclist.csv"
 if [ -f "$MACLIST_PATH" ]; then
-  echo "Maclist file found at: $MACLIST_PATH"
-  while IFS= read -r line; do
-    # Process each line of the maclist file
-    echo "Processing line: $line"
-    mac=$(echo "$line" | cut -d',' -f1)
-    ip=$(echo "$line" | cut -d',' -f2)
-    hostname=$(echo "$line" | cut -d',' -f3)
-    ssid=$(echo "$line" | cut -d',' -f4)
-    # Add logic to handle the extracted values as needed
-    echo "MAC: $mac, IP: $ip, Hostname: $hostname, SSID: $ssid"
+  echo "Processing maclist.csv for static DHCP leases..."
+  while IFS=, read -r mac_addr ip_addr device_name network_name; do
+    # Skip comment lines and empty lines
+    case "$mac_addr" in
+      \#*|"") continue ;;
+    esac
+    
+    # Convert device name to a valid UCI section name (replace hyphens with underscores)
+    device_section=$(echo "$device_name" | tr '-' '_')
+    
+    echo "Setting up static lease for $device_name ($mac_addr -> $ip_addr)"
+    
+    # Determine interface based on network_name (or use core as default)
+    network="${network_name:-core}"
+    
+    # Add static lease
+    uci set dhcp.$device_section=host
+    uci set dhcp.$device_section.name="$device_name"
+    uci set dhcp.$device_section.mac="$mac_addr"
+    uci set dhcp.$device_section.ip="$ip_addr"
+    uci set dhcp.$device_section.interface="$network"
   done < "$MACLIST_PATH"
+  echo "Static lease configuration completed successfully."
 else
-  echo "Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist' file."
-  exit 1
+  echo "Warning: maclist.csv not found at $MACLIST_PATH, skipping static lease configuration."
 fi
 
-# Update static IP and hostname assignment logic to handle empty SSID field
-MACLIST_PATH="$BASE_DIR/maclist"
-if [ -f "$MACLIST_PATH" ]; then
-  echo "Maclist file found at: $MACLIST_PATH"
-  echo "Assigning static IPs and hostnames based on MAC list..."
-  while IFS= read -r line; do
-    mac=$(echo "$line" | cut -d',' -f1)
-    ip=$(echo "$line" | cut -d',' -f2)
-    hostname=$(echo "$line" | cut -d',' -f3)
-    ssid=$(echo "$line" | cut -d',' -f4)
-    if [ -n "$mac" ] && [ -n "$ip" ] && [ -n "$hostname" ]; then
-      echo "Assigning IP $ip and hostname $hostname to MAC $mac..."
-      uci add dhcp host
-      uci set dhcp.@host[-1].mac="$mac"
-      uci set dhcp.@host[-1].ip="$ip"
-      uci set dhcp.@host[-1].name="$hostname"
-    fi
-  done < "$MACLIST_PATH"
-else
-  echo "Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist' file."
-  exit 1
-fi
+# Commented out static leases as they are now handled by maclist.csv
+# Static lease for rog-eth
+#uci set dhcp.rog_eth=host
+#uci set dhcp.rog_eth.name='rog-eth'
+#uci set dhcp.rog_eth.mac='CC:28:AA:38:71:8D'
+#uci set dhcp.rog_eth.ip='10.0.0.60'
+#uci set dhcp.rog_eth.interface='core'
+# Static lease for e800-eth
+#uci set dhcp.e800_eth=host
+#uci set dhcp.e800_eth.name='e800-eth'
+#uci set dhcp.e800_eth.mac='40:B0:34:F7:A3:40'
+#uci set dhcp.e800_eth.ip='10.0.0.70'
+#uci set dhcp.e800_eth.interface='core'
+#echo "Static lease configuration completed successfully."
 
-# Commit the changes
 uci commit dhcp
