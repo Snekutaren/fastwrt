@@ -1,8 +1,9 @@
-#!/bin/sh
-set -e  # Exit on any error
+#!/usr/bin/fish
+# FastWrt final commit script - Pure fish implementation
+
 # Ensure the script runs from its own directory
-cd "$BASE_DIR"
-echo "Current working directory: $(pwd)"
+cd $BASE_DIR
+echo "Current working directory: "(pwd)
 
 # Log the purpose of the script
 echo "Starting commit script to finalize and apply all changes..."
@@ -10,7 +11,7 @@ echo "Starting commit script to finalize and apply all changes..."
 ### --- Commit & Restart ---
 echo "Setup completed. Backups stored in $BACKUP_DIR/"
 echo "Press ENTER to commit changes and restart services (may disconnect SSH)."
-read -r dummy  # Wait for user confirmation
+read -l dummy  # Wait for user confirmation
 
 uci commit
 

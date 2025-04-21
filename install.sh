@@ -27,8 +27,8 @@ echo "Current working directory: $(pwd)"
 ##############################################
 # Shell Selection and Installation Logic
 ##############################################
-# Check for existing shells and install if missing
-echo "Checking for enhanced shells (bash/fish)..."
+# Check for fish shell and install if missing
+echo "Checking for fish shell..."
 
 # Function to check if a package is installed
 is_package_installed() {
@@ -57,136 +57,73 @@ install_package() {
   fi
 }
 
-# Determine the best available shell to use
-PREFERRED_SHELL="ash"  # Default fallback shell
-SHELL_CMD="ash"
-
-# Try to use fish, install if missing and possible
+# Check for fish shell and install if missing
 if is_package_installed "fish"; then
   echo "Fish shell is available."
-  PREFERRED_SHELL="fish"
-elif [ "$FIRMWARE_BUILD" != "true" ]; then  # Only try to install if not building firmware
-  echo "Fish shell not found."
+else
+  echo "Fish shell not found. Installing..."
   if install_package "fish"; then
     echo "Successfully installed fish shell."
-    PREFERRED_SHELL="fish"
   else
-    echo "Could not install fish shell, trying bash..."
+    echo "ERROR: Could not install fish shell. Please install manually with 'opkg install fish'."
+    exit 1
   fi
 fi
 
-# If fish not available, try bash
-if [ "$PREFERRED_SHELL" = "ash" ] && is_package_installed "bash"; then
-  echo "Bash shell is available."
-  PREFERRED_SHELL="bash"
-elif [ "$PREFERRED_SHELL" = "ash" ] && [ "$FIRMWARE_BUILD" != "true" ]; then  # Only try to install if not building firmware
-  echo "Bash shell not found."
-  if install_package "bash"; then
-    echo "Successfully installed bash shell."
-    PREFERRED_SHELL="bash"
-  else
-    echo "Could not install bash shell, falling back to ash."
-  fi
+# Also install bash for fallback (if needed)
+if ! is_package_installed "bash"; then
+  echo "Installing bash as fallback shell..."
+  install_package "bash" || echo "Warning: Could not install bash. Using ash as fallback."
 fi
 
-# Set the shell command based on the preferred shell
-case "$PREFERRED_SHELL" in
-  "fish")
-    SHELL_CMD="fish -c"
-    echo "Using fish shell for script execution."
-    ;;
-  "bash")
-    SHELL_CMD="bash"
-    echo "Using bash shell for script execution."
-    ;;
-  *)
-    SHELL_CMD="ash"
-    echo "Using ash shell for script execution."
-    ;;
-esac
+# Set environment variables using fish syntax
+# Create a fish script to set up the environment
+FISH_ENV_SCRIPT="$BASE_DIR/env.fish"
+cat > "$FISH_ENV_SCRIPT" <<'EOF'
+#!/usr/bin/fish
 
-# Export the preferred shell for other scripts
-export PREFERRED_SHELL
+# Set environment variables for the configuration
+set -gx BASE_DIR "$BASE_DIR"
 
-# Allow user to specify WireGuard IP and default zone policies
-WIREGUARD_IP="10.255.0.1"  # Default WireGuard IP
-#
-CORE_POLICY_IN="ACCEPT"  # Default Core input policy
-CORE_POLICY_OUT="ACCEPT"  # Default Core output policy
-CORE_POLICY_FORWARD="REJECT"  # Default Core forward policy
-#
-OTHER_ZONES_POLICY_IN="DROP"  # Default input policy for other zones
-OTHER_ZONES_POLICY_OUT="DROP"  # Default output policy for other zones
-OTHER_ZONES_POLICY_FORWARD="DROP"  # Default forward policy for other zones
-#
-WAN_POLICY_IN="DROP"  # Default WAN input policy
-WAN_POLICY_OUT="ACCEPT"  # Default WAN output policy
-WAN_POLICY_FORWARD="DROP"  # Default WAN forward policy
-
-# Log the default values
-echo "Default WireGuard IP: $WIREGUARD_IP"
-echo "Default WAN input policy: $WAN_POLICY_IN"
-echo "Default WAN output policy: $WAN_POLICY_OUT"
-echo "Default WAN forward policy: $WAN_POLICY_FORWARD"
-echo "Default input policy for other zones: $OTHER_ZONES_POLICY_IN"
-echo "Default output policy for other zones: $OTHER_ZONES_POLICY_OUT"
-echo "Default forward policy for other zones: $OTHER_ZONES_POLICY_FORWARD"
-echo "Default Core input policy: $CORE_POLICY_IN"
-echo "Default Core output policy: $CORE_POLICY_OUT"
-echo "Default Core forward policy: $CORE_POLICY_FORWARD"
-
-# Pass these values as environment variables to scripts
-export WIREGUARD_IP
-export WAN_POLICY_IN
-export WAN_POLICY_OUT
-export WAN_POLICY_FORWARD
-export OTHER_ZONES_POLICY_IN
-export OTHER_ZONES_POLICY_OUT
-export OTHER_ZONES_POLICY_FORWARD
-export CORE_POLICY_IN
-export CORE_POLICY_OUT
-export CORE_POLICY_FORWARD
-
-# Debugging: Log the exported variables
-echo "Exported WireGuard IP: $WIREGUARD_IP"
-echo "Exported WAN input policy: $WAN_POLICY_IN"
-echo "Exported WAN output policy: $WAN_POLICY_OUT"
-echo "Exported WAN forward policy: $WAN_POLICY_FORWARD"
-echo "Exported input policy for other zones: $OTHER_ZONES_POLICY_IN"
-echo "Exported output policy for other zones: $OTHER_ZONES_POLICY_OUT"
-echo "Exported forward policy for other zones: $OTHER_ZONES_POLICY_FORWARD"
-echo "Exported Core input policy: $CORE_POLICY_IN"
-echo "Exported Core output policy: $CORE_POLICY_OUT"
-echo "Exported Core forward policy: $CORE_POLICY_FORWARD"
+# Default configuration values
+set -gx WIREGUARD_IP "10.255.0.1"
+set -gx CORE_POLICY_IN "ACCEPT" 
+set -gx CORE_POLICY_OUT "ACCEPT" 
+set -gx CORE_POLICY_FORWARD "REJECT"
+set -gx OTHER_ZONES_POLICY_IN "DROP"
+set -gx OTHER_ZONES_POLICY_OUT "DROP"
+set -gx OTHER_ZONES_POLICY_FORWARD "DROP"
+set -gx WAN_POLICY_IN "DROP"
+set -gx WAN_POLICY_OUT "ACCEPT"
+set -gx WAN_POLICY_FORWARD "DROP"
 
 # Option to enable WAN6
-ENABLE_WAN6=false
-export ENABLE_WAN6 # export the variable to scripts
-#
-echo "WAN6 enabled: $ENABLE_WAN6"
+set -gx ENABLE_WAN6 false
 
 # Option to enable MAC filtering
-ENABLE_MAC_FILTERING=true
-export ENABLE_MAC_FILTERING # export the variable to scripts
-#
-echo "MAC filtering enabled: $ENABLE_MAC_FILTERING"
+set -gx ENABLE_MAC_FILTERING true
 
+# SSIDs
+set -gx SSID_CLOSEDWRT "ClosedWrt"
+set -gx SSID_OPENWRT "OpenWrt"
+set -gx SSID_METAWRT "MetaWrt"
+set -gx SSID_IOTWRT "IoTWrt"
 
-# Define SSIDs and their passphrases
-SSID_CLOSEDWRT="ClosedWrt"
-SSID_OPENWRT="OpenWrt"
-SSID_METAWRT="MetaWrt"
-SSID_IOTWRT="IoTWrt"
-# Export SSIDs as environment variables
-export SSID_OPENWRT
-export SSID_CLOSEDWRT
-export SSID_IOTWRT
-export SSID_METAWRT
+# Debug output to verify environment is loaded
+echo "Configuration environment set up in "(status filename)
+echo "BASE_DIR: $BASE_DIR"
+echo "WIREGUARD_IP: $WIREGUARD_IP"
+echo "Core policies: $CORE_POLICY_IN/$CORE_POLICY_OUT/$CORE_POLICY_FORWARD"
+echo "Other zones policies: $OTHER_ZONES_POLICY_IN/$OTHER_ZONES_POLICY_OUT/$OTHER_ZONES_POLICY_FORWARD"
+echo "WAN policies: $WAN_POLICY_IN/$WAN_POLICY_OUT/$WAN_POLICY_FORWARD"
+echo "ENABLE_WAN6: $ENABLE_WAN6"
+echo "ENABLE_MAC_FILTERING: $ENABLE_MAC_FILTERING"
+echo "SSIDs: $SSID_OPENWRT, $SSID_CLOSEDWRT, $SSID_METAWRT, $SSID_IOTWRT"
+EOF
 
 # Option to use pregenerated passphrases and set passphrase length
 USE_PREGENERATED_PASSPHRASES=true
 PASSPHRASE_LENGTH=32
-#
 echo "Using pregenerated passphrases: $USE_PREGENERATED_PASSPHRASES"
 echo "Passphrase length: $PASSPHRASE_LENGTH"
 
@@ -203,47 +140,26 @@ fi
 # Check if pregenerated passphrases should be used
 # Debugging: Check if the passphrases file exists and log its absolute path
 if [ "$USE_PREGENERATED_PASSPHRASES" = "true" ]; then
-  echo "Checking for passphrases file in $BASE_DIR..."
-  if [ -f "$BASE_DIR/passphrases" ]; then
-    echo "Passphrases file found at: $BASE_DIR/passphrases"
-    # Source passphrases from the external file
-    . "$BASE_DIR/passphrases"
+  echo "Checking for fish-compatible passphrases file in $BASE_DIR..."
+  if [ -f "$BASE_DIR/passphrases.fish" ]; then
+    echo "Fish-compatible passphrases file found at: $BASE_DIR/passphrases.fish"
+    # The fish script will source this directly, no need to add it to the env script
   else
-    echo "Error: Passphrases file not found in $BASE_DIR. Please create a 'passphrases' file."
+    echo "Error: Fish-compatible passphrases file not found in $BASE_DIR. Please create a 'passphrases.fish' file."
     exit 1
   fi
 else
-  # Generate new random passphrases
-  PASSPHRASE_OPENWRT=$(openssl rand -base64 $PASSPHRASE_LENGTH)
-  PASSPHRASE_CLOSEDWRT=$(openssl rand -base64 $PASSPHRASE_LENGTH)
-  PASSPHRASE_IOTWRT=$(openssl rand -base64 $PASSPHRASE_LENGTH)
-  PASSPHRASE_METAWRT=$(openssl rand -base64 $PASSPHRASE_LENGTH)
+  # Generate new random passphrases with fish syntax
+  echo "# Generating random passphrases" >> "$FISH_ENV_SCRIPT"
+  echo "set -gx PASSPHRASE_OPENWRT \"$(openssl rand -base64 $PASSPHRASE_LENGTH)\"" >> "$FISH_ENV_SCRIPT"
+  echo "set -gx PASSPHRASE_CLOSEDWRT \"$(openssl rand -base64 $PASSPHRASE_LENGTH)\"" >> "$FISH_ENV_SCRIPT"
+  echo "set -gx PASSPHRASE_IOTWRT \"$(openssl rand -base64 $PASSPHRASE_LENGTH)\"" >> "$FISH_ENV_SCRIPT"
+  echo "set -gx PASSPHRASE_METAWRT \"$(openssl rand -base64 $PASSPHRASE_LENGTH)\"" >> "$FISH_ENV_SCRIPT"
 fi
 
-# Password validation
-# Check if the passphrases meet the length requirement
-for passphrase in "$PASSPHRASE_OPENWRT" "$PASSPHRASE_CLOSEDWRT" "$PASSPHRASE_IOTWRT" "$PASSPHRASE_METAWRT"; do
-  if [ ${#passphrase} -lt 8 ]; then
-    echo "Error: Passphrase too short (minimum 8 characters)."
-    exit 1
-  fi
-  if ! echo "$passphrase" | grep -q '[A-Za-z0-9]'; then
-    echo "Error: Passphrase must contain alphanumeric characters."
-    exit 1
-  fi
-done
-
-# Export passphrases as environment variables
-export PASSPHRASE_OPENWRT
-export PASSPHRASE_CLOSEDWRT
-export PASSPHRASE_IOTWRT
-export PASSPHRASE_METAWRT
-
-# Log the exported variables
-echo "Exported SSID and passphrase for OpenWrt: $SSID_OPENWRT / $PASSPHRASE_OPENWRT"
-echo "Exported SSID and passphrase for ClosedWrt: $SSID_CLOSEDWRT / $PASSPHRASE_CLOSEDWRT"
-echo "Exported SSID and passphrase for IoTWrt: $SSID_IOTWRT / $PASSPHRASE_IOTWRT"
-echo "Exported SSID and passphrase for MetaWrt: $SSID_METAWRT / $PASSPHRASE_METAWRT"
+# Debug: Print the environment script contents for verification
+echo "Generated fish environment script contents:"
+cat "$FISH_ENV_SCRIPT"
 
 # Define the scripts directory using the absolute path from BASE_DIR
 SCRIPTS_DIR="$BASE_DIR/scripts"
@@ -256,51 +172,32 @@ echo "Scripts directory: $SCRIPTS_DIR"
 echo "Scripts to execute:"
 ls -l "$SCRIPTS_DIR"/*.sh
 
-# Execute all scripts in the scripts directory using the preferred shell
+# Execute each script with fish
+echo "Executing configuration scripts with fish shell..."
 for script in "$SCRIPTS_DIR"/*.sh; do
   if [ -f "$script" ]; then
     chmod +x "$script"  # Ensure the script is executable
+    script_name=$(basename "$script")
+    echo "Running $script_name with fish shell..."
     
-    # Update shebang line if needed to match the preferred shell (for bash scripts)
-    if [ "$PREFERRED_SHELL" = "bash" ]; then
-      # Backup the original script
-      cp "$script" "${script}.bak"
-      
-      # Update the shebang only if it's not already set to bash
-      if ! grep -q "^#!/bin/bash" "$script"; then
-        sed '1s|^#!/bin/sh|#!/bin/bash|' "${script}.bak" > "$script"
-        chmod +x "$script"
-        echo "Updated shebang to bash in $script"
-      fi
-      
-      # Remove the backup if successful
-      rm "${script}.bak"
-    fi
+    # Execute the script with fish
+    # Pass the script as a parameter to fish rather than using exec
+    fish -C "source $FISH_ENV_SCRIPT" "$script"
+    script_status=$?
     
-    # Adjusted logging for alignment
-    echo "Running $script using $PREFERRED_SHELL..."
-    
-    # Execute based on the preferred shell
-    case "$PREFERRED_SHELL" in
-      "fish")
-        fish -c ". \"$script\""
-        ;;
-      *)
-        # For bash or ash
-        $SHELL_CMD "$script"
-        ;;
-    esac
-    
-    if [ $? -eq 0 ]; then
-      echo "$script executed successfully."
+    if [ $script_status -eq 0 ]; then
+      echo "$script_name executed successfully."
     else
-      echo "Error: $script failed to execute."
+      echo "Error: $script_name failed to execute (exit code: $script_status)."
       exit 1
     fi
   else
     echo "Skipping $script (not a file)"
   fi
 done
+
+# Clean up
+rm -f "$FISH_ENV_SCRIPT"
 
 echo "All scripts executed. Installation complete."
 } 2>&1 | tee -a "$LOG_FILE"

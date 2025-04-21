@@ -28,8 +28,8 @@ __pycache__/
 *.old
 *.orig
 
-# Ignore the external passphrases file
-passphrases
+# Ignore all passphrase files (both original and fish-compatible)
+passphrases*
 
 # Ignore the external MAC list file
 maclist

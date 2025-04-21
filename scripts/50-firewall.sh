@@ -1,9 +1,9 @@
-#!/bin/bash
-# Using bash for enhanced array support and other features
-set -e  # Exit on any error
+#!/usr/bin/fish
+# FastWrt firewall configuration script - Pure fish implementation
+
 # Ensure the script runs from its own directory
-cd "$BASE_DIR"
-echo "Current working directory: $(pwd)"
+cd $BASE_DIR
+echo "Current working directory: "(pwd)
 
 # Log the start of the script
 echo "Starting firewall configuration..."
@@ -13,47 +13,46 @@ echo "Starting firewall configuration..."
 #############################################
 
 # Find and preserve any default rules we want to keep (by rule name)
-# Using bash arrays for cleaner code
 echo "Preserving default system rules..."
-DEFAULT_RULES=()
-MULTICAST_RULES=()
+set DEFAULT_RULES
+set MULTICAST_RULES
 
-for rule in $(uci show firewall | grep '@rule' | cut -d. -f2 | cut -d= -f1); do
-  rule_name=$(uci get firewall.$rule.name 2>/dev/null)
-  if [ "$rule_name" = "Allow-DHCP-Renew" ] || [ "$rule_name" = "Allow-Ping" ] || [ "$rule_name" = "Allow-DHCPv6" ] || [ "$rule_name" = "Allow-ICMPv6-Input" ] || [ "$rule_name" = "Allow-ICMPv6-Forward" ]; then
+for rule in (uci show firewall | grep '@rule' | cut -d. -f2 | cut -d= -f1)
+  set rule_name (uci get firewall.$rule.name 2>/dev/null)
+  if test "$rule_name" = "Allow-DHCP-Renew"; or test "$rule_name" = "Allow-Ping"; or test "$rule_name" = "Allow-DHCPv6"; or test "$rule_name" = "Allow-ICMPv6-Input"; or test "$rule_name" = "Allow-ICMPv6-Forward"
     echo "Preserving default rule: $rule_name"
-    DEFAULT_RULES+=("$rule")
-  elif [ "$rule_name" = "Allow-IGMP" ] || [ "$rule_name" = "Allow-MLD" ]; then
+    set -a DEFAULT_RULES $rule
+  else if test "$rule_name" = "Allow-IGMP"; or test "$rule_name" = "Allow-MLD"
     echo "Preserving multicast rule: $rule_name (will be disabled)"
-    MULTICAST_RULES+=("$rule")
-  fi
-done
+    set -a MULTICAST_RULES $rule
+  end
+end
 
 # Remove any existing Allow-IPSec-ESP and Allow-ISAKMP rules specifically
 echo "Removing any existing Allow-IPSec-ESP and Allow-ISAKMP rules..."
-for rule in $(uci show firewall | grep -E "name='Allow-IPSec-ESP'|name='Allow-ISAKMP'" | cut -d. -f2 | cut -d= -f1); do
+for rule in (uci show firewall | grep -E "name='Allow-IPSec-ESP'|name='Allow-ISAKMP'" | cut -d. -f2 | cut -d= -f1)
   echo "Deleting firewall rule: $rule"
   uci delete firewall.$rule
   echo "Notice: Firewall rule $rule has been deleted."
-done
+end
 
-# Clear redirects, rules, forwarding, and zones (preserving defaults is handled after)
+# Clear redirects, rules, forwarding, and zones
 echo "Cleaning up firewall configuration..."
-while uci delete firewall.@redirect[0] 2>/dev/null; do
+while uci delete firewall.@redirect[0] 2>/dev/null
   echo "Deleted firewall.@redirect[0]."
-done
+end
 
-while uci delete firewall.@rule[0] 2>/dev/null; do
+while uci delete firewall.@rule[0] 2>/dev/null
   echo "Deleted firewall.@rule[0]."
-done
+end
 
-while uci delete firewall.@forwarding[0] 2>/dev/null; do
+while uci delete firewall.@forwarding[0] 2>/dev/null
   echo "Deleted firewall.@forwarding[0]."
-done
+end
 
-while uci delete firewall.@zone[0] 2>/dev/null; do
+while uci delete firewall.@zone[0] 2>/dev/null
   echo "Deleted firewall.@zone[0]."
-done
+end
 
 # Firewall Defaults (Drop All)
 echo "Setting global firewall defaults..."
@@ -71,93 +70,95 @@ uci set firewall.@defaults[0].flow_offloading_hw='1'
 
 echo "Adding firewall zones..."
 
-# Core Zone (Uses Core Zone Policy: $CORE_POLICY_IN/$CORE_POLICY_OUT/$CORE_POLICY_FORWARD)
+# Core Zone
 echo "Adding Core Zone (Input: $CORE_POLICY_IN, Output: $CORE_POLICY_OUT, Forward: $CORE_POLICY_FORWARD)..."
-uci set firewall.core=zone
+uci set firewall.core='zone'
 uci set firewall.core.name='core'
 uci set firewall.core.network='core'
-uci set firewall.core.input="${CORE_POLICY_IN:-ACCEPT}"
-uci set firewall.core.output="${CORE_POLICY_OUT:-ACCEPT}"
-uci set firewall.core.forward="${CORE_POLICY_FORWARD:-REJECT}"
+uci set firewall.core.input="$CORE_POLICY_IN"
+uci set firewall.core.output="$CORE_POLICY_OUT"
+uci set firewall.core.forward="$CORE_POLICY_FORWARD"
 
-# Nexus Zone (Uses Other Zones Policy)
-echo "Adding Nexus Zone (Input: $OTHER_ZONES_POLICY_IN, Output: $OTHER_ZONES_POLICY_OUT, Forward: $OTHER_ZONES_POLICY_FORWARD)..."
-uci set firewall.nexus=zone
+# Nexus Zone
+echo "Adding Nexus Zone..."
+uci set firewall.nexus='zone'
 uci set firewall.nexus.name='nexus'
 uci set firewall.nexus.network='nexus'
-uci set firewall.nexus.input="${OTHER_ZONES_POLICY_IN:-DROP}"
-uci set firewall.nexus.output="${OTHER_ZONES_POLICY_OUT:-DROP}"
-uci set firewall.nexus.forward="${OTHER_ZONES_POLICY_FORWARD:-DROP}"
+uci set firewall.nexus.input="$OTHER_ZONES_POLICY_IN"
+uci set firewall.nexus.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.nexus.forward="$OTHER_ZONES_POLICY_FORWARD"
 
-# Nodes Zone (Uses Other Zones Policy)
-echo "Adding Nodes Zone (Input: $OTHER_ZONES_POLICY_IN, Output: $OTHER_ZONES_POLICY_OUT, Forward: $OTHER_ZONES_POLICY_FORWARD)..."
-uci set firewall.nodes=zone
+# Nodes Zone
+echo "Adding Nodes Zone..."
+uci set firewall.nodes='zone'
 uci set firewall.nodes.name='nodes'
 uci set firewall.nodes.network='nodes'
-uci set firewall.nodes.input="${OTHER_ZONES_POLICY_IN:-DROP}"
-uci set firewall.nodes.output="${OTHER_ZONES_POLICY_OUT:-DROP}"
-uci set firewall.nodes.forward="${OTHER_ZONES_POLICY_FORWARD:-DROP}"
+uci set firewall.nodes.input="$OTHER_ZONES_POLICY_IN"
+uci set firewall.nodes.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.nodes.forward="$OTHER_ZONES_POLICY_FORWARD"
 
-# Meta Zone (Uses Other Zones Policy)
-echo "Adding meta Zone (Input: $OTHER_ZONES_POLICY_IN, Output: $OTHER_ZONES_POLICY_OUT, Forward: $OTHER_ZONES_POLICY_FORWARD)..."
-uci set firewall.meta=zone
+# Meta Zone
+echo "Adding meta Zone..."
+uci set firewall.meta='zone'
 uci set firewall.meta.name='meta'
 uci set firewall.meta.network='meta'
-uci set firewall.meta.input="${OTHER_ZONES_POLICY_IN:-DROP}"
-uci set firewall.meta.output="${OTHER_ZONES_POLICY_OUT:-DROP}"
-uci set firewall.meta.forward="${OTHER_ZONES_POLICY_FORWARD:-DROP}"
+uci set firewall.meta.input="$OTHER_ZONES_POLICY_IN"
+uci set firewall.meta.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.meta.forward="$OTHER_ZONES_POLICY_FORWARD"
 
-# IoT Zone (Uses Other Zones Policy)
-echo "Adding IoT Zone (Input: $OTHER_ZONES_POLICY_IN, Output: $OTHER_ZONES_POLICY_OUT, Forward: $OTHER_ZONES_POLICY_FORWARD)..."
-uci set firewall.Iot=zone
-uci set firewall.Iot.name='Iot'
-uci set firewall.Iot.network='iot'
-uci set firewall.Iot.input="${OTHER_ZONES_POLICY_IN:-DROP}"
-uci set firewall.Iot.output="${OTHER_ZONES_POLICY_OUT:-DROP}"
-uci set firewall.Iot.forward="${OTHER_ZONES_POLICY_FORWARD:-DROP}"
+# IoT Zone
+echo "Adding IoT Zone..."
+uci set firewall.iot='zone'
+uci set firewall.iot.name='iot'
+uci set firewall.iot.network='iot'
+uci set firewall.iot.input="$OTHER_ZONES_POLICY_IN"
+uci set firewall.iot.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.iot.forward="$OTHER_ZONES_POLICY_FORWARD"
 
-# Guest Zone (Uses Other Zones Policy)
-echo "Adding guest Zone (Input: $OTHER_ZONES_POLICY_IN, Output: $OTHER_ZONES_POLICY_OUT, Forward: $OTHER_ZONES_POLICY_FORWARD)..."
-uci set firewall.guest=zone
+# Guest Zone
+echo "Adding guest Zone..."
+uci set firewall.guest='zone'
 uci set firewall.guest.name='guest'
 uci set firewall.guest.network='guest'
-uci set firewall.guest.input="${OTHER_ZONES_POLICY_IN:-DROP}"
-uci set firewall.guest.output="${OTHER_ZONES_POLICY_OUT:-DROP}"
-uci set firewall.guest.forward="${OTHER_ZONES_POLICY_FORWARD:-DROP}"
+uci set firewall.guest.input="$OTHER_ZONES_POLICY_IN"
+uci set firewall.guest.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.guest.forward="$OTHER_ZONES_POLICY_FORWARD"
 
-# WireGuard Zone (Uses Other Zones Policy)
-echo "Adding WireGuard Zone (Input: $OTHER_ZONES_POLICY_IN, Output: $OTHER_ZONES_POLICY_OUT, Forward: $OTHER_ZONES_POLICY_FORWARD)..."
-uci set firewall.wireguard=zone
+# WireGuard Zone
+echo "Adding WireGuard Zone..."
+uci set firewall.wireguard='zone'
 uci set firewall.wireguard.name='wireguard'
 uci set firewall.wireguard.network='wireguard'
-uci set firewall.wireguard.input="${OTHER_ZONES_POLICY_IN:-DROP}"
-uci set firewall.wireguard.output="${OTHER_ZONES_POLICY_OUT:-DROP}"
-uci set firewall.wireguard.forward="${OTHER_ZONES_POLICY_FORWARD:-DROP}"
+uci set firewall.wireguard.input="$OTHER_ZONES_POLICY_IN"
+uci set firewall.wireguard.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.wireguard.forward="$OTHER_ZONES_POLICY_FORWARD"
 
-# WAN Zone (Uses WAN Zone Policy)
-echo "Adding WAN Zone (Input: $WAN_POLICY_IN, Output: $WAN_POLICY_OUT, Forward: $WAN_POLICY_FORWARD)..."
-uci set firewall.wan=zone
-uci set firewall.wan.name='wan'
-uci set firewall.wan.network='wan wan6'
-uci set firewall.wan.input="${WAN_POLICY_IN:-DROP}"
-uci set firewall.wan.output="${WAN_POLICY_OUT:-ACCEPT}"
-uci set firewall.wan.forward="${WAN_POLICY_FORWARD:-DROP}"
-uci set firewall.wan.masq='1'  # Keep NAT enabled
+# WAN Zone
+echo "Adding WAN Zone..."
+uci add firewall zone
+uci set firewall.@zone[-1]='zone'
+uci set firewall.@zone[-1].name='wan'
+uci set firewall.@zone[-1].network='wan wan6'
+uci set firewall.@zone[-1].input="$WAN_POLICY_IN"
+uci set firewall.@zone[-1].output="$WAN_POLICY_OUT"
+uci set firewall.@zone[-1].forward="$WAN_POLICY_FORWARD"
+uci set firewall.@zone[-1].masq='1'  # Keep NAT enabled
 
 # Re-add default system rules that we preserved
 echo "Re-adding preserved default system rules..."
-for rule in "${DEFAULT_RULES[@]}"; do
-  rule_name=$(uci get firewall.$rule.name 2>/dev/null)
+for rule in $DEFAULT_RULES
+  set rule_name (uci get firewall.$rule.name 2>/dev/null)
   echo "Re-adding default rule: $rule_name"
   uci add firewall rule
+  uci set firewall.@rule[-1]='rule'
   
   # Copy all properties from the preserved rule
-  for prop in $(uci show firewall.$rule | cut -d= -f1); do
-    prop_name=$(echo "$prop" | cut -d. -f3)
-    prop_value=$(uci get $prop 2>/dev/null)
-    uci set firewall.@rule[-1].$prop_name="$prop_value"
-  done
-done
+  for prop in (uci show firewall.$rule | cut -d= -f1)
+    set prop_name (echo "$prop" | cut -d. -f3)
+    set prop_value (uci get $prop 2>/dev/null)
+    uci set firewall.@rule[-1].$prop_name "$prop_value"
+  end
+end
 
 #########################################
 # SECTION 2.1: DISABLED SPECIAL RULES
@@ -168,6 +169,7 @@ echo "Configuring special disabled rules (VPN and multicast)..."
 # Add disabled IPSec-ESP and ISAKMP rules for core
 echo "Adding disabled IPSec/VPN rules..."
 uci add firewall rule
+uci set firewall.@rule[-1]='rule'
 uci set firewall.@rule[-1].name='Allow-IPSec-ESP'
 uci set firewall.@rule[-1].src='wan'
 uci set firewall.@rule[-1].dest='core'
@@ -176,6 +178,7 @@ uci set firewall.@rule[-1].target='ACCEPT'
 uci set firewall.@rule[-1].enabled='0'
 
 uci add firewall rule
+uci set firewall.@rule[-1]='rule'
 uci set firewall.@rule[-1].name='Allow-ISAKMP'
 uci set firewall.@rule[-1].src='wan'
 uci set firewall.@rule[-1].dest='core'
@@ -186,25 +189,57 @@ uci set firewall.@rule[-1].enabled='0'
 
 # Re-add multicast rules that we preserved but keep them disabled
 echo "Re-adding preserved multicast rules (disabled)..."
-for rule in "${MULTICAST_RULES[@]}"; do
-  rule_name=$(uci get firewall.$rule.name 2>/dev/null)
-  echo "Re-adding multicast rule: $rule_name"
+if test (count $MULTICAST_RULES) -gt 0
+  # Debug: Print the multicast rules we're about to add
+  echo "Found "(count $MULTICAST_RULES)" multicast rules to restore:"
+  for rule in $MULTICAST_RULES
+    echo "- $rule"
+  end
+  
+  for rule in $MULTICAST_RULES
+    set rule_name (uci get firewall.$rule.name 2>/dev/null)
+    echo "Re-adding multicast rule: $rule_name"
+    uci add firewall rule
+    uci set firewall.@rule[-1]='rule'
+    
+    # Copy all properties from the preserved rule
+    for prop in (uci show firewall.$rule | cut -d= -f1)
+      set prop_name (echo "$prop" | cut -d. -f3)
+      set prop_value (uci get $prop 2>/dev/null)
+      echo "  Setting property $prop_name to $prop_value"
+      uci set firewall.@rule[-1].$prop_name="$prop_value"
+    end
+    
+    # Explicitly disable the rule
+    echo "Disabling multicast rule: $rule_name"
+    uci set firewall.@rule[-1].enabled='0'
+  end
+else
+  echo "No multicast rules found to restore."
+  
+  # Add default multicast rules if none were preserved
+  echo "Creating default multicast rules (disabled)..."
+  
+  # Allow-IGMP rule
   uci add firewall rule
-  
-  # Copy all properties from the preserved rule
-  for prop in $(uci show firewall.$rule | cut -d= -f1); do
-    prop_name=$(echo "$prop" | cut -d. -f3)
-    prop_value=$(uci get $prop 2>/dev/null)
-    uci set firewall.@rule[-1].$prop_name="$prop_value"
-  done
-  
-  # Explicitly disable the rule
-  echo "Disabling multicast rule: $rule_name"
+  uci set firewall.@rule[-1]='rule'
+  uci set firewall.@rule[-1].name='Allow-IGMP'
+  uci set firewall.@rule[-1].src='wan'
+  uci set firewall.@rule[-1].proto='igmp'
+  uci set firewall.@rule[-1].target='ACCEPT'
   uci set firewall.@rule[-1].enabled='0'
-done
-
-# Clean up temporary files when done
-rm -rf "$TMP_DIR"
+  
+  # Allow-MLD rule
+  uci add firewall rule
+  uci set firewall.@rule[-1]='rule'
+  uci set firewall.@rule[-1].name='Allow-MLD'
+  uci set firewall.@rule[-1].src='wan'
+  uci set firewall.@rule[-1].family='ipv6'
+  uci set firewall.@rule[-1].proto='icmp'
+  uci set firewall.@rule[-1].icmp_type='130/0'
+  uci set firewall.@rule[-1].target='ACCEPT'
+  uci set firewall.@rule[-1].enabled='0'
+end
 
 ####################################
 # SECTION 3: ZONE FORWARDING RULES
@@ -212,21 +247,62 @@ rm -rf "$TMP_DIR"
 
 echo "Configuring zone forwarding rules..."
 
-# Core to WAN (Internet access for Core)
+# Core to WAN (Internet access for ClosedWrt network)
 echo "Adding forwarding from Core to WAN..."
 uci add firewall forwarding
+uci set firewall.@forwarding[-1]='forwarding'
 uci set firewall.@forwarding[-1].src='core'
 uci set firewall.@forwarding[-1].dest='wan'
 
-# Guest to WAN (Internet access for Guest)
+# Guest to WAN (Internet access for OpenWrt network)
 echo "Adding forwarding from Guest to WAN for internet access..."
 uci add firewall forwarding
+uci set firewall.@forwarding[-1]='forwarding'
 uci set firewall.@forwarding[-1].src='guest'
 uci set firewall.@forwarding[-1].dest='wan'
 
-# Note: Guest access to internal networks is already blocked by default
-# as no forwarding rules exist between guest and internal zones.
-# This can be managed through the LuCI interface if needed.
+# Allow all zones to get DHCP, even without internet access
+echo "Adding DHCP access rules for all other zones (without internet access)..."
+
+# For IoT network
+echo "Adding DHCP access for IoT network..."
+uci add firewall rule
+uci set firewall.@rule[-1]='rule'
+uci set firewall.@rule[-1].name='Allow-DHCP-IoT'
+uci set firewall.@rule[-1].src='iot'
+uci set firewall.@rule[-1].proto='udp'
+uci set firewall.@rule[-1].dest_port='67 68'
+uci set firewall.@rule[-1].target='ACCEPT'
+
+# For Meta network
+echo "Adding DHCP access for Meta network..."
+uci add firewall rule
+uci set firewall.@rule[-1]='rule'
+uci set firewall.@rule[-1].name='Allow-DHCP-Meta'
+uci set firewall.@rule[-1].src='meta'
+uci set firewall.@rule[-1].proto='udp'
+uci set firewall.@rule[-1].dest_port='67 68'
+uci set firewall.@rule[-1].target='ACCEPT'
+
+# For Nexus network
+echo "Adding DHCP access for Nexus network..."
+uci add firewall rule
+uci set firewall.@rule[-1]='rule'
+uci set firewall.@rule[-1].name='Allow-DHCP-Nexus'
+uci set firewall.@rule[-1].src='nexus'
+uci set firewall.@rule[-1].proto='udp'
+uci set firewall.@rule[-1].dest_port='67 68'
+uci set firewall.@rule[-1].target='ACCEPT'
+
+# For Nodes network
+echo "Adding DHCP access for Nodes network..."
+uci add firewall rule
+uci set firewall.@rule[-1]='rule'
+uci set firewall.@rule[-1].name='Allow-DHCP-Nodes'
+uci set firewall.@rule[-1].src='nodes'
+uci set firewall.@rule[-1].proto='udp'
+uci set firewall.@rule[-1].dest_port='67 68'
+uci set firewall.@rule[-1].target='ACCEPT'
 
 ######################################
 # SECTION 4: DNS CONFIGURATION RULES
@@ -237,6 +313,7 @@ echo "Configuring DNS rules and enforcement..."
 # Allow DNS for guest network specifically
 echo "Adding DNS access for guest network..."
 uci add firewall rule
+uci set firewall.@rule[-1]='rule'
 uci set firewall.@rule[-1].name='Allow-DNS-Guest'
 uci set firewall.@rule[-1].src='guest'
 uci set firewall.@rule[-1].proto='tcp udp'
@@ -248,10 +325,12 @@ uci set firewall.@rule[-1].enabled='1'
 echo "Adding DNS enforcement rules to redirect all DNS queries to router..."
 
 # Add per-zone rules for DNS redirection
-for zone in core nexus nodes meta iot guest; do
+for zone in core nexus nodes meta iot guest
   echo "Creating NAT rules to redirect DNS traffic to router for zone $zone..."
+  
   # DNS UDP Rule
   uci add firewall redirect
+  uci set firewall.@redirect[-1]='redirect'
   uci set firewall.@redirect[-1].name="Redirect-DNS-UDP-$zone"
   uci set firewall.@redirect[-1].src="$zone"
   uci set firewall.@redirect[-1].proto='udp'
@@ -261,17 +340,19 @@ for zone in core nexus nodes meta iot guest; do
 
   # DNS TCP Rule
   uci add firewall redirect
+  uci set firewall.@redirect[-1]='redirect'
   uci set firewall.@redirect[-1].name="Redirect-DNS-TCP-$zone"
   uci set firewall.@redirect[-1].src="$zone"
   uci set firewall.@redirect[-1].proto='tcp'
   uci set firewall.@redirect[-1].src_dport='53'
   uci set firewall.@redirect[-1].dest_port='53'
   uci set firewall.@redirect[-1].target='DNAT'
-done
+end
 
-# Block direct external DNS (prevents DNS over HTTPS/TLS circumvention)
+# Block direct external DNS
 echo "Blocking direct external DNS access except from router..."
 uci add firewall rule
+uci set firewall.@rule[-1]='rule'
 uci set firewall.@rule[-1].name='Block-External-DNS'
 uci set firewall.@rule[-1].src='*'
 uci set firewall.@rule[-1].dest='wan'
@@ -289,6 +370,7 @@ echo "Configuring service and protocol specific rules..."
 # Guest DHCP rule - Allow guest network to get DHCP addresses
 echo "Adding rule to allow guest network to acquire DHCP addresses..."
 uci add firewall rule
+uci set firewall.@rule[-1]='rule'
 uci set firewall.@rule[-1].name='Allow-DHCP-Guest'
 uci set firewall.@rule[-1].src='guest'
 uci set firewall.@rule[-1].proto='udp'
@@ -305,6 +387,7 @@ echo "Configuring port forwarding rules..."
 # Port Forward: WAN -> WireGuard
 echo "Adding port forward from WAN to WireGuard ($WIREGUARD_IP)..."
 uci add firewall redirect
+uci set firewall.@redirect[-1]='redirect'
 uci set firewall.@redirect[-1].name='PortForwardWANtoWG'
 uci set firewall.@redirect[-1].src='wan'
 uci set firewall.@redirect[-1].src_dport='52018'
