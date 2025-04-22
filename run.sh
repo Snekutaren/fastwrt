@@ -2,4 +2,4 @@
 # Simple launcher script for FastWrt
 
 # Make all scripts executable and then run the installer
-chmod -R +x Firmware/*.sh && Firmware/install.sh "$@"
+chmod -R +x ./*.sh && ./scripts/etc/uci-defaults/01-install.sh "$@"

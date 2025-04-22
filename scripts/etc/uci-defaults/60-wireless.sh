@@ -41,18 +41,54 @@ uci set wireless.radio0.band='2g'
 uci set wireless.radio0.htmode='HT20'
 uci set wireless.radio0.disabled='0'
 uci set wireless.radio0.country='SE'  # Adjust country code as needed
+# Fix for Indoor Only Channel issue - explicitly set indoor/outdoor mode
+uci set wireless.radio0.indoor='1'  # Set to 1 for indoor use, 0 for outdoor
+uci set wireless.radio0.cell_density='0'  # 0=default density
 
 # Configure 5GHz radio
 echo "Configuring 5GHz radio (radio1)..."
 uci set wireless.radio1='wifi-device'
-uci set wireless.radio1.channel='36'
+uci set wireless.radio1.channel='36'  # Using a commonly allowed indoor channel
 uci set wireless.radio1.band='5g'
 uci set wireless.radio1.htmode='VHT80'
 uci set wireless.radio1.disabled='0'
 uci set wireless.radio1.country='SE'  # Adjust country code as needed
+# Fix for Indoor Only Channel issue - explicitly set indoor/outdoor mode
+uci set wireless.radio1.indoor='1'  # Set to 1 for indoor use, 0 for outdoor
+uci set wireless.radio1.cell_density='0'  # 0=default density
 
-# Commit wireless settings before creating interfaces
-uci commit wireless
+# Verify that all networks exist before configuring wireless interfaces
+echo "Verifying all required networks exist..."
+set required_networks core guest iot meta
+
+for net in $required_networks
+    if not uci -q get "network.$net" > /dev/null
+        echo "ERROR: Network '$net' does not exist. Creating it as a fallback..."
+        # Create a fallback network if it doesn't exist
+        uci set "network.$net"='interface'
+        uci set "network.$net.proto"='static'
+        uci set "network.$net.device"='br-lan'
+        
+        # Set a default IP based on the network
+        switch $net
+            case core
+                uci set "network.$net.ipaddr"='10.0.0.1'
+            case guest
+                uci set "network.$net.ipaddr"='192.168.90.1'
+            case iot
+                uci set "network.$net.ipaddr"='10.0.80.1'
+            case meta
+                uci set "network.$net.ipaddr"='10.0.70.1'
+            case '*'
+                uci set "network.$net.ipaddr"='192.168.100.1'
+        end
+        
+        uci set "network.$net.netmask"='255.255.255.0'
+        echo "Created fallback network: $net"
+    else
+        echo "Network '$net' exists, proceeding."
+    end
+end
 
 # Configure interfaces for each SSID
 # Assign IoT to 2G radio

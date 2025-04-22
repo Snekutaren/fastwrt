@@ -36,7 +36,7 @@ if test -d "$ssh_keys_dir"
         if test -f "$key_file"
             echo "Found key file: $key_file"
             # Call secure_ssh.sh to add the keys
-            source "$BASE_DIR/scripts/secure_ssh.sh"
+            source "$BASE_DIR/helpers/secure_ssh.sh"
             break
         end
     end

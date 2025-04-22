@@ -212,8 +212,8 @@ if command -v fail2ban-client > /dev/null 2>&1
 end
 
 echo "Security report generated at $REPORT_FILE"
-' > "$BASE_DIR/scripts/ssh_security_report.sh"
-chmod +x "$BASE_DIR/scripts/ssh_security_report.sh"
+' > "$BASE_DIR/helpers/ssh_security_report.sh"
+chmod +x "$BASE_DIR/helpers/ssh_security_report.sh"
 
 # Log additional security recommendations
 echo "
