@@ -98,11 +98,15 @@ echo "DHCP pool configuration completed successfully."
 set MACLIST_PATH "$BASE_DIR/maclist.csv"
 if test -f "$MACLIST_PATH"
   echo "Processing maclist.csv for static DHCP leases..."
+  set line_count 0
   
   # Using fish's builtin line reading capabilities
   while read -l line
-    # Skip comment lines and empty lines
-    if string match -q "#*" $line; or test -z "$line"
+    # Count lines for better debugging
+    set line_count (math $line_count + 1)
+    
+    # Skip comment lines and empty lines with better detection
+    if string match -q "#*" $line; or test -z (string trim "$line")
       continue
     end
     
@@ -111,26 +115,20 @@ if test -f "$MACLIST_PATH"
     
     # Validate that we have all required fields
     if test (count $fields) -lt 4
-      echo "Warning: Invalid line format in maclist.csv: $line"
+      echo "Warning: Invalid line format in maclist.csv on line $line_count: $line"
       echo "Expected format: MAC,IP,NAME,NETWORK"
       continue
     end
     
     # Extract fields and validate
-    set mac_addr $fields[1]
-    set ip_addr $fields[2]
-    set device_name $fields[3]
-    set network_name $fields[4]
+    set mac_addr (string trim "$fields[1]")
+    set ip_addr (string trim "$fields[2]")
+    set device_name (string trim "$fields[3]")
+    set network_name (string trim "$fields[4]")
     
     # Skip if any required fields are empty
-    if test -z "$mac_addr"; or test -z "$ip_addr"; or test -z "$device_name"; or test -z "$network_name"
-      echo "Warning: Missing required field in maclist.csv line: $line"
-      continue
-    end
-    
-    # Validate MAC address format (simple check)
-    if not string match -r '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$' "$mac_addr" > /dev/null
-      echo "Warning: Invalid MAC address format: $mac_addr"
+    if test -z "$mac_addr"; or test -z "$ip_addr"; or test -z "$device_name"
+      echo "Warning: Missing required field in maclist.csv line $line_count: $line"
       continue
     end
     
@@ -144,6 +142,11 @@ if test -f "$MACLIST_PATH"
     uci set dhcp.$device_section.name="$device_name"
     uci set dhcp.$device_section.mac="$mac_addr"
     uci set dhcp.$device_section.ip="$ip_addr"
+    
+    # Use network_name if provided, otherwise default to "core"
+    if test -z "$network_name"
+      set network_name "core"
+    end
     uci set dhcp.$device_section.interface="$network_name"
   end < "$MACLIST_PATH"
   
@@ -152,5 +155,5 @@ else
   echo "Warning: maclist.csv not found at $MACLIST_PATH, skipping static lease configuration."
 end
 
-uci commit dhcp
-echo "DHCP and DNS configuration completed successfully."
+# Note: UCI commits are handled in 98-commit.sh
+echo "DHCP and DNS configuration completed successfully. Changes will be applied during final commit."

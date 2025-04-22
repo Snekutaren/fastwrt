@@ -142,18 +142,61 @@ set MACLIST_PATH "$BASE_DIR/maclist.csv"
 if test -f "$MACLIST_PATH"
   echo "Maclist file found at: $MACLIST_PATH"
   
+  # First, collect all core/ClosedWrt MAC addresses
+  set core_macs
+  
   while read -l line
     # Skip comment lines and empty lines
-    if string match -q "#*" $line; or test -z "$line"
+    if string match -q "#*" $line; or test -z (string trim "$line")
       continue
     end
     
     # Parse CSV line (mac,ip,name,network)
     set fields (string split "," $line)
-    set mac_addr $fields[1]
-    set ip_addr $fields[2]
-    set device_name $fields[3]
-    set network_name $fields[4]
+    
+    # Skip lines with invalid format
+    if test (count $fields) -lt 4
+      continue
+    end
+    
+    set mac_addr (string trim "$fields[1]")
+    set device_name (string trim "$fields[3]")
+    set network_name (string trim "$fields[4]")
+    
+    # Skip non-wifi devices (those with names ending in -eth)
+    if string match -q "*-eth" "$device_name"
+      continue
+    end
+    
+    # Convert network name to lowercase for standardization
+    set network_name_lower (string lower "$network_name")
+    
+    # Add to core_macs array if this is a core/ClosedWrt device
+    if test "$network_name_lower" = "core" -o "$network_name_lower" = "closedwrt"
+      set -a core_macs $mac_addr
+      echo "Added $mac_addr to core devices list (from $network_name)"
+    end
+  end < "$MACLIST_PATH"
+  
+  # Now process the maclist again and assign MACs to networks
+  while read -l line
+    # Skip comment lines and empty lines
+    if string match -q "#*" $line; or test -z (string trim "$line")
+      continue
+    end
+    
+    # Parse CSV line (mac,ip,name,network)
+    set fields (string split "," $line)
+    
+    # Skip lines with invalid format
+    if test (count $fields) -lt 4
+      continue
+    end
+    
+    set mac_addr (string trim "$fields[1]")
+    set ip_addr (string trim "$fields[2]")
+    set device_name (string trim "$fields[3]")
+    set network_name (string trim "$fields[4]")
     
     echo "Processing MAC entry: MAC=$mac_addr, IP=$ip_addr, Name=$device_name, Network=$network_name"
     
@@ -163,28 +206,74 @@ if test -f "$MACLIST_PATH"
       continue
     end
     
-    # Always add MAC to the appropriate maclist for future reference
+    # Convert network name to lowercase for standardization
+    set network_name_lower (string lower "$network_name")
+    
+    # Map SSID names to network names if needed
+    switch "$network_name_lower"
+      case "closedwrt"
+        set network_name "core"
+      case "openwrt"
+        set network_name "guest"
+      case "iotwrt"
+        set network_name "iot"
+      case "metawrt"
+        set network_name "meta"
+    end
+    
+    echo "Adding MAC $mac_addr to $network_name network"
+    
+    # Add MAC to the appropriate maclist for its primary network
     switch "$network_name"
       case core
-        uci add_list wireless.wifinet3.maclist "$mac_addr"
-        uci add_list wireless.wifinet4.maclist "$mac_addr"
+        uci add_list wireless.wifinet3.maclist="$mac_addr"
+        uci add_list wireless.wifinet4.maclist="$mac_addr"
         
       case guest
-        uci add_list wireless.wifinet1.maclist "$mac_addr"
-        uci add_list wireless.wifinet2.maclist "$mac_addr"
+        uci add_list wireless.wifinet1.maclist="$mac_addr"
+        uci add_list wireless.wifinet2.maclist="$mac_addr"
         
       case meta
-        uci add_list wireless.wifinet5.maclist "$mac_addr"
+        uci add_list wireless.wifinet5.maclist="$mac_addr"
         
       case iot
-        uci add_list wireless.wifinet0.maclist "$mac_addr"
+        uci add_list wireless.wifinet0.maclist="$mac_addr"
         
       case '*'
         echo "Skipping MAC $mac_addr - no valid network specified ($network_name)"
     end
   end < "$MACLIST_PATH"
+  
+  # Now add all core/ClosedWrt MACs to all other networks as well
+  echo "Adding ClosedWrt devices to all networks' MAC allow lists..."
+  for mac in $core_macs
+    echo "Adding core device MAC $mac to all networks"
+    # Add to guest network (OpenWrt)
+    uci add_list wireless.wifinet1.maclist="$mac"
+    uci add_list wireless.wifinet2.maclist="$mac"
+    # Add to IoT network
+    uci add_list wireless.wifinet0.maclist="$mac"
+    # Add to Meta network
+    uci add_list wireless.wifinet5.maclist="$mac"
+  end
+  
 else
   echo "Maclist file not found at: $MACLIST_PATH"
+end
+
+# Directly enable MAC filtering if the flag is set to true
+if test "$ENABLE_MAC_FILTERING" = true
+  echo "MAC filtering enabled by configuration, activating it now..."
+  uci set wireless.wifinet0.macfilter='allow'
+  uci set wireless.wifinet1.macfilter='allow'
+  uci set wireless.wifinet2.macfilter='allow'
+  uci set wireless.wifinet3.macfilter='allow'
+  uci set wireless.wifinet4.macfilter='allow'
+  uci set wireless.wifinet5.macfilter='allow'
+  echo "MAC filtering has been enabled. Only devices in the maclist will be allowed to connect."
+else
+  echo "MAC filtering is disabled by configuration."
+  echo "To enable it later, run enable_mac_filtering.sh script."
 end
 
 # Create enable_mac_filtering script for later activation
@@ -211,9 +300,9 @@ echo "MAC filtering has been enabled. Only devices in the maclist.csv will now b
 chmod +x "$BASE_DIR/enable_mac_filtering.sh"
 echo "Created utility script $BASE_DIR/enable_mac_filtering.sh to enable MAC filtering when ready."
 
-# Commit changes and reload wireless configuration
-uci commit wireless
-wifi reload
+# Early commit to ensure we don't lose passphrase changes
+# Note: UCI commits are handled in 98-commit.sh instead
+echo "Wireless configuration changes complete. Changes will be applied during final commit."
 
 echo "Wireless configuration script completed successfully."
 echo "NOTE: MAC filtering is currently DISABLED. Run enable_mac_filtering.sh when you're ready to activate it."

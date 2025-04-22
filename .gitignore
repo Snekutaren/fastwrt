@@ -43,3 +43,6 @@ NETWORK-DOCUMENTATION.md
 
 # Temporarily ignore README.md
 README.md
+
+# Ignore keys
+id_ed25519*

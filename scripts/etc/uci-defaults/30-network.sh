@@ -250,6 +250,5 @@ else
   echo "WAN6 disabled."
 end
 
-# Commit the changes
-uci commit network
-echo "Network configuration completed successfully."
+# Note: UCI commits are handled in 98-commit.sh
+echo "Network configuration completed successfully. Changes will be applied during final commit."
