@@ -187,10 +187,10 @@ echo "$yellow""If WireGuard doesn't work after installation, run: repair-wiregua
 # This will run the repair script once at boot if needed
 echo "$blue""Adding WireGuard check to cron jobs...""$reset"
 mkdir -p /etc/crontabs
-if ! grep -q "repair-wireguard" /etc/crontabs/root 2>/dev/null; then
+if ! grep -q "repair-wireguard" /etc/crontabs/root 2>/dev/null
     echo "@reboot sleep 60 && ip link show wireguard >/dev/null 2>&1 || /usr/bin/repair-wireguard" >> /etc/crontabs/root
     echo "$green""Added WireGuard check to cron jobs""$reset"
-fi
+end  # Added missing end statement here
 
 # Verify configuration
 echo "$blue""Verifying WireGuard configuration...""$reset"

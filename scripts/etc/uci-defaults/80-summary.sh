@@ -1,5 +1,5 @@
 #!/usr/bin/fish
-# FastWrt pending changes summary - Report changes only, install.sh handles commits
+# FastWrt configuration validation and summary - No commits, just reports changes
 
 # Set colors for better readability
 set green (echo -e "\033[0;32m")
@@ -14,7 +14,7 @@ cd $BASE_DIR
 echo "$blue""Current working directory: ""$reset"(pwd)
 
 # Log the purpose of the script
-echo "$purple""Generating summary of pending configuration changes...""$reset"
+echo "$purple""Validating and summarizing configuration changes (NO COMMITS)...""$reset"
 
 # Get a list of all modified UCI configurations
 echo "$yellow""The following UCI configurations have been modified:""$reset"
@@ -31,7 +31,7 @@ echo "$yellow""Configuration change summary:""$reset"
 set total_changes (uci changes | wc -l)
 echo "$green""Total of $total_changes changes across ""$reset"(count $modified_configs)"$green"" configuration files.""$reset"
 
-echo "$yellow""NOTE: All commits will be handled by the main install.sh script.""$reset"
+echo "$yellow""NOTE: This script only validates and summarizes changes. All commits are handled by 01-install.sh.""$reset"
 
 # Create a summary file in /tmp for reference
 if test "$DEBUG" = "true"

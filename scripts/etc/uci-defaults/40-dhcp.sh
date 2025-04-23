@@ -103,6 +103,12 @@ for interface in $INTERFACES
     echo "$yellow""Setting public DNS for guest network""$reset"
     uci add_list dhcp.$interface.dhcp_option='6,8.8.8.8,8.8.4.4'  # Use Google DNS for guests
   end
+  
+  # Ensure ignore is explicitly set to '0' for wireless interfaces
+  if test "$interface" = "core" -o "$interface" = "guest" -o "$interface" = "iot" -o "$interface" = "meta"
+    echo "$green""Ensuring DHCP is explicitly enabled for $interface""$reset"
+    uci set dhcp.$interface.ignore='0'
+  end
 end
 
 # Now add WAN last to ensure it appears at the end of the list in GUI
@@ -112,6 +118,21 @@ uci set dhcp.wan.interface='wan'
 uci set dhcp.wan.ignore='1'
 
 echo "$green""DHCP pool configuration completed successfully.""$reset"
+
+# Verify dnsmasq is running and restart if needed
+echo "$blue""Verifying dnsmasq service...""$reset"
+if not pidof dnsmasq > /dev/null
+    echo "$yellow""dnsmasq not running, attempting to restart...""$reset"
+    /etc/init.d/dnsmasq restart
+    sleep 2
+    if not pidof dnsmasq > /dev/null
+        echo "$red""WARNING: dnsmasq failed to start. DHCP will not work.""$reset"
+    else
+        echo "$green""dnsmasq started successfully""$reset"
+    end
+else
+    echo "$green""dnsmasq is running properly""$reset"
+end
 
 # Process maclist.csv for static DHCP leases
 set MACLIST_PATH "$BASE_DIR/maclist.csv"

@@ -364,6 +364,26 @@ echo "$green""MAC filtering has been enabled. Only devices in the maclist.csv wi
 chmod +x "$BASE_DIR/enable_mac_filtering.sh"
 echo "$green""Created utility script $BASE_DIR/enable_mac_filtering.sh to enable MAC filtering when ready.""$reset"
 
+# DEBUG
+# Add a check to ensure the network interface exists before assigning it
+echo "$blue""Verifying network interfaces before assigning them...""$reset"
+for i in 0 1 2 3 4 5
+    set wifinet "wireless.wifinet$i"
+    set network_name (uci get "$wifinet.network" 2>/dev/null)
+    
+    if test -n "$network_name"
+        if not uci -q get "network.$network_name" > /dev/null
+            echo "$red""ERROR: Network interface '$network_name' does not exist!""$reset"
+            echo "$red""Wireless interface '$wifinet' will not be properly configured.""$reset"
+        else
+            echo "$green""Network interface '$network_name' exists, assigning it to '$wifinet'""$reset"
+        end
+    else
+        echo "$yellow""WARNING: No network assigned to '$wifinet', skipping verification.""$reset"
+    end
+end
+# DEBUG
+
 # Note: UCI commits are handled in 98-commit.sh instead
 echo "$green""Wireless configuration changes complete. Changes will be applied during final commit.""$reset"
 

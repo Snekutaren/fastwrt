@@ -17,56 +17,16 @@ echo "$blue""Current working directory: ""$reset"(pwd)
 # Log the start of the script
 echo "$purple""Starting firewall configuration...""$reset"
 
-#############################################
-# SECTION 1: CLEANUP & INITIAL CONFIGURATION
-#############################################
+### SECTION 1: DEFINE CONSTANTS AND MANAGEMENT IPs ###
+# Define management IPs that should always have access
+set -g MANAGEMENT_IPS "10.0.0.60"
+echo "$blue""Management IPs with guaranteed access: $MANAGEMENT_IPS""$reset"
 
-# Log all existing rules before cleanup for debugging
-echo "$blue""Existing rules before cleanup:""$reset"
-uci show firewall | grep '@rule' | sort
-
-# Find and preserve any default rules we want to keep (by rule name)
-echo "$blue""Preserving default system rules...""$reset"
-set preserved_rules
-set rule_configs
-
-# Use associative arrays to ensure uniqueness of preserved rules
-set -g preserved_rule_names
-set -g preserved_rule_sections
-
-# Check for existing named rules to preserve
-for rule in (uci show firewall | grep '@rule' | cut -d. -f2 | cut -d= -f1 | sort -u)
-  set rule_name (uci -q get firewall.$rule.name)
-  
-  # Only preserve essential system rules, not our custom ones
-  if string match -q "Allow-DHCP-Renew" "$rule_name"; or \
-     string match -q "Allow-Ping" "$rule_name"; or \
-     string match -q "Allow-DHCPv6" "$rule_name"; or \
-     string match -q "Allow-ICMPv6-Input" "$rule_name"; or \
-     string match -q "Allow-ICMPv6-Forward" "$rule_name"
-     
-    # Skip if we already processed this rule name
-    if contains "$rule_name" $preserved_rule_names
-      continue
-    end
-    
-    echo "$green""Preserving essential system rule: $rule_name""$reset"
-    
-    # Store the rule name and section to be restored later
-    set -a preserved_rule_names "$rule_name"
-    set -a preserved_rule_sections "$rule"
-    
-    # Store rule configuration in array
-    # Format: "rule_name|property=value|property2=value2|..."
-    set rule_config (uci show firewall.$rule | tr '\n' '|')
-    set -a rule_configs "$rule_name|$rule_config"
-  else
-    echo "$yellow""Will remove rule: $rule ($rule_name)""$reset"
-  end
-end
+### SECTION 2: COMPLETE FIREWALL RESET ###
+echo "$blue""Performing complete firewall reset...""$reset"
 
 # Clear all firewall configuration completely
-echo "$blue""Cleaning up firewall configuration...""$reset"
+echo "$blue""Removing all existing firewall configuration...""$reset"
 
 # Clear redirects
 while uci -q delete firewall.@redirect[0] > /dev/null
@@ -98,285 +58,136 @@ uci set firewall.@defaults[0].drop_invalid='1'
 uci set firewall.@defaults[0].flow_offloading='1'
 uci set firewall.@defaults[0].flow_offloading_hw='1'
 
-# Re-add the essential system rules we preserved with proper names
-echo "$blue""Restoring preserved system rules...""$reset"
-set restored_rules
+### SECTION 3: ANTI-LOCKOUT SAFETY RULES ###
+echo "$blue""Adding anti-lockout safety rules...""$reset"
 
-# Track rules we've already restored to avoid duplicates
-for i in (seq (count $preserved_rule_names))
-  set rule_name $preserved_rule_names[$i]
-  
-  # Skip if we already restored this rule
-  if contains "$rule_name" $restored_rules
-    continue
-  end
-  
-  echo "$green""Re-adding system rule: $rule_name""$reset"
-  set -a restored_rules "$rule_name"
-  
-  # Create new rule with proper name as section identifier (sanitized for UCI)
-  set rule_section (string replace -a "-" "_" $rule_name | string lower)
-  uci set firewall.$rule_section='rule'
-  uci set firewall.$rule_section.name="$rule_name"
-  
-  # Find the stored rule properties for this rule name
-  for config_entry in $rule_configs
-    set parts (string split "|" $config_entry)
-    set stored_rule_name $parts[1]
-    
-    # Skip if this isn't the rule we're looking for
-    if test "$stored_rule_name" != "$rule_name"
-      continue
-    end
-    
-    # Process the rule configuration (skip first part, which is rule name)
-    for i in (seq 2 (count $parts))
-      set prop $parts[$i]
-      if test -n "$prop"
-        # Extract property name and value
-        set prop_parts (string match -r '([^=]+)=(.*)' "$prop")
-        if test (count $prop_parts) -ge 3
-          set prop_name $prop_parts[2]
-          set prop_value $prop_parts[3]
-          
-          # Skip if prop_name contains '.' or is 'name' (we already set it)
-          if not string match -q "*.*" "$prop_name"; and test "$prop_name" != "name"
-            # Remove quotes from the value
-            set prop_value (string trim -c "'" "$prop_value")
-            
-            # Set the property
-            uci set firewall.$rule_section.$prop_name="$prop_value"
-            echo "$yellow""  Setting $prop_name=$prop_value""$reset"
-          end
-        end
-      end
-    end
-  end
-  
-  # Ensure mandatory fields are set
-  if test -z (uci -q get firewall.$rule_section.target)
-    uci set firewall.$rule_section.target='ACCEPT'
-  end
+# Rule 1: Allow established connections (highest priority)
+echo "$green""Creating rule for established connections...""$reset"
+uci set firewall.allow_established='rule'
+uci set firewall.allow_established.name='Allow-Established-Connections'
+uci set firewall.allow_established.proto='all'
+uci set firewall.allow_established.src='*'
+uci set firewall.allow_established.dest='*'
+uci set firewall.allow_established.target='ACCEPT'
+uci set firewall.allow_established.extra='--ctstate RELATED,ESTABLISHED'
+uci set firewall.allow_established.priority='1' # Highest priority (lower number)
+uci set firewall.allow_established.enabled='1'
+uci set firewall.allow_established.family='any' # Ensure IPv4 and IPv6
+
+# Rule 2: Allow SSH access from management IP (second highest priority)
+echo "$green""Creating rule for management IP access...""$reset"
+uci set firewall.mgmt_access='rule'
+uci set firewall.mgmt_access.name='Management-Access'
+uci set firewall.mgmt_access.proto='tcp' # Limit to TCP for SSH
+uci set firewall.mgmt_access.src='*'
+uci set firewall.mgmt_access.src_ip="$MANAGEMENT_IPS"
+uci set firewall.mgmt_access.dest_port='6622' # Limit to SSH port
+uci set firewall.mgmt_access.target='ACCEPT'
+uci set firewall.mgmt_access.priority='2'
+uci set firewall.mgmt_access.enabled='1'
+uci set firewall.mgmt_access.family='any' # Ensure IPv4 and IPv6
+
+# Rule 3: Allow SSH access from core network
+uci set firewall.ssh_from_core='rule'
+uci set firewall.ssh_from_core.name='SSH-from-Core'
+uci set firewall.ssh_from_core.src='core'
+uci set firewall.ssh_from_core.proto='tcp'
+uci set firewall.ssh_from_core.dest_port='6622'
+uci set firewall.ssh_from_core.target='ACCEPT'
+uci set firewall.ssh_from_core.priority='3'
+uci set firewall.ssh_from_core.enabled='1'
+uci set firewall.ssh_from_core.family='any' # Ensure IPv4 and IPv6
+
+# Rule 4: Allow SSH access from WireGuard
+uci set firewall.ssh_from_wireguard='rule'
+uci set firewall.ssh_from_wireguard.name='SSH-from-WireGuard'
+uci set firewall.ssh_from_wireguard.src='wireguard'
+uci set firewall.ssh_from_wireguard.proto='tcp'
+uci set firewall.ssh_from_wireguard.dest_port='6622'
+uci set firewall.ssh_from_wireguard.target='ACCEPT'
+uci set firewall.ssh_from_wireguard.priority='3'
+uci set firewall.ssh_from_wireguard.enabled='1'
+uci set firewall.ssh_from_wireguard.family='any' # Ensure IPv4 and IPv6
+
+# Rule 5: Enable web access from core network
+uci set firewall.web_from_core='rule'
+uci set firewall.web_from_core.name='Web-from-Core'
+uci set firewall.web_from_core.src='core'
+uci set firewall.web_from_core.proto='tcp'
+uci set firewall.web_from_core.dest_port='80 443'
+uci set firewall.web_from_core.target='ACCEPT'
+uci set firewall.web_from_core.priority='4'
+uci set firewall.web_from_core.enabled='1'
+uci set firewall.web_from_core.family='any' # Ensure IPv4 and IPv6
+
+### SECTION 4: ESSENTIAL OPENWRT STANDARD RULES ###
+echo "$blue""Adding OpenWrt standard essential rules...""$reset"
+
+# Allow DHCP for all interfaces
+echo "$green""Creating DHCP rules...""$reset"
+uci set firewall.allow_dhcp='rule'
+uci set firewall.allow_dhcp.name='Allow-DHCP-All'
+uci set firewall.allow_dhcp.proto='udp'
+uci set firewall.allow_dhcp.src='*'
+uci set firewall.allow_dhcp.dest_port='67 68'
+uci set firewall.allow_dhcp.target='ACCEPT'
+uci set firewall.allow_dhcp.priority='10'
+uci set firewall.allow_dhcp.enabled='1'
+
+# Allow DHCP renewal from WAN
+echo "$green""Creating DHCP renewal rule...""$reset"
+uci set firewall.allow_dhcp_renew='rule'
+uci set firewall.allow_dhcp_renew.name='Allow-DHCP-Renew'
+uci set firewall.allow_dhcp_renew.src='wan'
+uci set firewall.allow_dhcp_renew.proto='udp'
+uci set firewall.allow_dhcp_renew.dest_port='68'
+uci set firewall.allow_dhcp_renew.target='ACCEPT'
+uci set firewall.allow_dhcp_renew.family='ipv4'
+uci set firewall.allow_dhcp_renew.priority='10'
+uci set firewall.allow_dhcp_renew.enabled='1'
+
+# Allow basic ICMP (ping)
+echo "$green""Creating ping rule...""$reset"
+uci set firewall.allow_ping='rule'
+uci set firewall.allow_ping.name='Allow-Ping'
+uci set firewall.allow_ping.proto='icmp'
+uci set firewall.allow_ping.icmp_type='echo-request'
+uci set firewall.allow_ping.family='ipv4'
+uci set firewall.allow_ping.target='ACCEPT'
+uci set firewall.allow_ping.enabled='1'
+
+# Add IPv6 rules if IPv6 is enabled
+if test "$ENABLE_WAN6" = "true"
+    echo "$green""Creating IPv6 rules...""$reset"
+    uci set firewall.allow_icmpv6_input='rule'
+    uci set firewall.allow_icmpv6_input.name='Allow-ICMPv6-Input'
+    uci set firewall.allow_icmpv6_input.proto='icmp'
+    uci set firewall.allow_icmpv6_input.icmp_type='echo-request destination-unreachable packet-too-big time-exceeded bad-header unknown-header-type router-solicitation neighbour-solicitation router-advertisement neighbour-advertisement'
+    uci set firewall.allow_icmpv6_input.limit='1000/sec'
+    uci set firewall.allow_icmpv6_input.family='ipv6'
+    uci set firewall.allow_icmpv6_input.target='ACCEPT'
+
+    uci set firewall.allow_icmpv6_forward='rule'
+    uci set firewall.allow_icmpv6_forward.name='Allow-ICMPv6-Forward'
+    uci set firewall.allow_icmpv6_forward.dest='*'
+    uci set firewall.allow_icmpv6_forward.proto='icmp'
+    uci set firewall.allow_icmpv6_forward.icmp_type='echo-request destination-unreachable packet-too-big time-exceeded bad-header unknown-header-type'
+    uci set firewall.allow_icmpv6_forward.limit='1000/sec'
+    uci set firewall.allow_icmpv6_forward.family='ipv6'
+    uci set firewall.allow_icmpv6_forward.target='ACCEPT'
+
+    uci set firewall.allow_dhcpv6='rule'
+    uci set firewall.allow_dhcpv6.name='Allow-DHCPv6'
+    uci set firewall.allow_dhcpv6.proto='udp'
+    uci set firewall.allow_dhcpv6.src_ip='fc00::/6'
+    uci set firewall.allow_dhcpv6.src_port='547'
+    uci set firewall.allow_dhcpv6.dest_port='546'
+    uci set firewall.allow_dhcpv6.family='ipv6'
+    uci set firewall.allow_dhcpv6.target='ACCEPT'
 end
 
-#################################
-# SECTION 2: ZONE CONFIGURATION
-#################################
-
-echo "$blue""Adding firewall zones...""$reset"
-
-# Core Zone
-echo "$green""Adding Core Zone (Input: $CORE_POLICY_IN, Output: $CORE_POLICY_OUT, Forward: $CORE_POLICY_FORWARD)...""$reset"
-uci set firewall.core='zone'
-uci set firewall.core.name='core'
-uci set firewall.core.network='core'
-uci set firewall.core.input="$CORE_POLICY_IN"
-uci set firewall.core.output="$CORE_POLICY_OUT"
-uci set firewall.core.forward="$CORE_POLICY_FORWARD"
-
-# Nexus Zone
-echo "$green""Adding Nexus Zone...""$reset"
-uci set firewall.nexus='zone'
-uci set firewall.nexus.name='nexus'
-uci set firewall.nexus.network='nexus'
-uci set firewall.nexus.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.nexus.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
-uci set firewall.nexus.forward="$OTHER_ZONES_POLICY_FORWARD"
-
-# Nodes Zone
-echo "$green""Adding Nodes Zone...""$reset"
-uci set firewall.nodes='zone'
-uci set firewall.nodes.name='nodes'
-uci set firewall.nodes.network='nodes'
-uci set firewall.nodes.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.nodes.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
-uci set firewall.nodes.forward="$OTHER_ZONES_POLICY_FORWARD"
-
-# Meta Zone
-echo "$green""Adding Meta Zone...""$reset"
-uci set firewall.meta='zone'
-uci set firewall.meta.name='meta'
-uci set firewall.meta.network='meta'
-uci set firewall.meta.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.meta.output="$IOT_META_POLICY_OUT"  # DROP - restricted internet access
-uci set firewall.meta.forward="$OTHER_ZONES_POLICY_FORWARD"
-
-# IoT Zone
-echo "$green""Adding IoT Zone...""$reset"
-uci set firewall.iot='zone'
-uci set firewall.iot.name='iot'
-uci set firewall.iot.network='iot'
-uci set firewall.iot.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.iot.output="$IOT_META_POLICY_OUT"  # DROP - restricted internet access
-uci set firewall.iot.forward="$OTHER_ZONES_POLICY_FORWARD"
-
-# Guest Zone
-echo "$green""Adding Guest Zone...""$reset"
-uci set firewall.guest='zone'
-uci set firewall.guest.name='guest'
-uci set firewall.guest.network='guest'
-uci set firewall.guest.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.guest.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
-uci set firewall.guest.forward="$OTHER_ZONES_POLICY_FORWARD"
-
-# WireGuard Zone
-echo "$green""Adding WireGuard Zone...""$reset"
-uci set firewall.wireguard='zone'
-uci set firewall.wireguard.name='wireguard'
-uci set firewall.wireguard.network='wireguard'
-uci set firewall.wireguard.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.wireguard.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
-uci set firewall.wireguard.forward="$OTHER_ZONES_POLICY_FORWARD"
-
-# WAN Zone
-echo "$green""Adding WAN Zone...""$reset"
-uci set firewall.wan_zone='zone'
-uci set firewall.wan_zone.name='wan'
-uci set firewall.wan_zone.network='wan wan6'
-uci set firewall.wan_zone.input="$WAN_POLICY_IN"
-uci set firewall.wan_zone.output="$WAN_POLICY_OUT"
-uci set firewall.wan_zone.forward="$WAN_POLICY_FORWARD"
-uci set firewall.wan_zone.masq='1'  # Keep NAT enabled
-
-# Add strict enforcement rules for WAN input and forward policies
-echo "$blue""Adding strict enforcement rule for WAN input policy...""$reset"
-uci set firewall.enforce_wan_input='rule'
-uci set firewall.enforce_wan_input.name='Enforce-WAN-Input-Policy'
-uci set firewall.enforce_wan_input.src='wan'
-uci set firewall.enforce_wan_input.proto='all'
-uci set firewall.enforce_wan_input.target='DROP'
-uci set firewall.enforce_wan_input.priority='1'  # Highest priority (lower number)
-uci set firewall.enforce_wan_input.enabled='1'
-
-echo "$blue""Adding strict enforcement rule for WAN forwarding policy...""$reset"
-uci set firewall.enforce_wan_forward='rule'
-uci set firewall.enforce_wan_forward.name='Enforce-WAN-Forward-Policy'
-uci set firewall.enforce_wan_forward.src='wan'
-uci set firewall.enforce_wan_forward.dest='*'
-uci set firewall.enforce_wan_forward.proto='all'
-uci set firewall.enforce_wan_forward.target='DROP'
-uci set firewall.enforce_wan_forward.priority='1'  # Highest priority (lower number)
-uci set firewall.enforce_wan_forward.enabled='1'
-
-##################################
-# SECTION 2.1: SSH ACCESS RULES
-##################################
-
-echo "$blue""Configuring SSH firewall access rules...""$reset"
-
-# Allow SSH access only from core network
-uci set firewall.ssh_access_core='rule'
-uci set firewall.ssh_access_core.name='SSH-from-core'
-uci set firewall.ssh_access_core.src='core'
-uci set firewall.ssh_access_core.proto='tcp'
-uci set firewall.ssh_access_core.dest_port='6622'
-uci set firewall.ssh_access_core.target='ACCEPT'
-
-# Allow SSH access from WireGuard VPN
-uci set firewall.ssh_access_wireguard='rule'
-uci set firewall.ssh_access_wireguard.name='SSH-from-wireguard'
-uci set firewall.ssh_access_wireguard.src='wireguard'
-uci set firewall.ssh_access_wireguard.proto='tcp'
-uci set firewall.ssh_access_wireguard.dest_port='6622'
-uci set firewall.ssh_access_wireguard.target='ACCEPT'
-
-# Explicitly block SSH access from WAN for clarity
-uci set firewall.ssh_block_wan='rule'
-uci set firewall.ssh_block_wan.name='SSH-block-wan'
-uci set firewall.ssh_block_wan.src='wan'
-uci set firewall.ssh_block_wan.proto='tcp'
-uci set firewall.ssh_block_wan.dest_port='6622'
-uci set firewall.ssh_block_wan.target='DROP'  # Changed from REJECT to DROP
-uci set firewall.ssh_block_wan.enabled='1'
-
-# SSH rate limiting rule
-uci set firewall.ssh_limit='rule'
-uci set firewall.ssh_limit.name='SSH-Limit'
-uci set firewall.ssh_limit.src='wan'
-uci set firewall.ssh_limit.proto='tcp'
-uci set firewall.ssh_limit.dest_port='6622'
-uci set firewall.ssh_limit.limit='10/minute'
-uci set firewall.ssh_limit.target='ACCEPT'
-uci set firewall.ssh_limit.enabled='0'  # Disabled by default, enable in secure_ssh.sh
-
-# Enhanced SSH protection with connection tracking
-uci set firewall.ssh_protect='rule'
-uci set firewall.ssh_protect.name='SSH-Protection'
-uci set firewall.ssh_protect.src='wan'
-uci set firewall.ssh_protect.proto='tcp'
-uci set firewall.ssh_protect.dest_port='6622'
-uci set firewall.ssh_protect.target='DROP'
-uci set firewall.ssh_protect.limit='1/second'
-uci set firewall.ssh_protect.connbytes='60'
-uci set firewall.ssh_protect.connbytes_mode='connbytes'
-uci set firewall.ssh_protect.connbytes_dir='original'
-uci set firewall.ssh_protect.enabled='0'  # Disabled by default, enable in secure_ssh.sh
-
-# Add a high-priority rule to ensure core network always has access to LuCI web interface
-echo "$blue""Adding high-priority rule to ensure core network always has web UI access...""$reset"
-uci set firewall.luci_core_access='rule'
-uci set firewall.luci_core_access.name='LuCI-web-from-core'
-uci set firewall.luci_core_access.src='core'
-uci set firewall.luci_core_access.proto='tcp'
-uci set firewall.luci_core_access.dest_port='80'
-uci set firewall.luci_core_access.target='ACCEPT'
-uci set firewall.luci_core_access.priority='0'  # Highest possible priority (lower number = higher priority)
-uci set firewall.luci_core_access.enabled='1'
-
-#########################################
-# SECTION 2.2: DISABLED SPECIAL RULES
-#########################################
-
-echo "$blue""Configuring special disabled rules (VPN and multicast)...""$reset"
-
-# Add disabled IPSec-ESP and ISAKMP rules for core
-echo "$green""Adding disabled IPSec/VPN rules...""$reset"
-uci set firewall.allow_ipsec_esp='rule'
-uci set firewall.allow_ipsec_esp.name='Allow-IPSec-ESP'
-uci set firewall.allow_ipsec_esp.src='wan'
-uci set firewall.allow_ipsec_esp.dest='core'
-uci set firewall.allow_ipsec_esp.proto='esp'
-uci set firewall.allow_ipsec_esp.target='ACCEPT'
-uci set firewall.allow_ipsec_esp.enabled='0'
-
-uci set firewall.allow_isakmp='rule'
-uci set firewall.allow_isakmp.name='Allow-ISAKMP'
-uci set firewall.allow_isakmp.src='wan'
-uci set firewall.allow_isakmp.dest='core'
-uci set firewall.allow_isakmp.dest_port='500'
-uci set firewall.allow_isakmp.proto='udp'
-uci set firewall.allow_isakmp.target='ACCEPT'
-uci set firewall.allow_isakmp.enabled='0'
-
-# Check if MULTICAST_RULES is defined before using it
-set -q MULTICAST_RULES; or set MULTICAST_RULES
-
-# Add default multicast rules
-echo "$blue""Creating default multicast rules (disabled)...""$reset"
-
-# Allow-IGMP rule
-uci set firewall.allow_igmp='rule'
-uci set firewall.allow_igmp.name='Allow-IGMP'
-uci set firewall.allow_igmp.src='wan'
-uci set firewall.allow_igmp.proto='igmp'
-uci set firewall.allow_igmp.target='ACCEPT'
-uci set firewall.allow_igmp.enabled='0'
-
-# Allow-MLD rule
-uci set firewall.allow_mld='rule'
-uci set firewall.allow_mld.name='Allow-MLD'
-uci set firewall.allow_mld.src='wan'
-uci set firewall.allow_mld.family='ipv6'
-uci set firewall.allow_mld.proto='icmp'
-uci set firewall.allow_mld.icmp_type='130/0'
-uci set firewall.allow_mld.target='ACCEPT'
-uci set firewall.allow_mld.enabled='0'
-
-####################################
-# SECTION 3: ZONE FORWARDING RULES
-####################################
-
-echo "$blue""Configuring zone forwarding rules...""$reset"
+### SECTION 5: ZONE CONFIGURATION ###
+echo "$blue""Configuring firewall zones...""$reset"
 
 # First verify that all required networks exist
 set required_networks core guest iot meta nexus nodes wireguard wan
@@ -388,149 +199,181 @@ for net in $required_networks
     end
 end
 
+# If networks are missing, warn but don't abort - we'll create zones anyway
 if test (count $missing_networks) -gt 0
-    echo "$red""ERROR: The following networks referenced in firewall aren't defined: ""$reset"(string join ", " $missing_networks)
-    echo "$red""Network interfaces must be properly configured in 30-network.sh before firewall configuration.""$reset"
-    echo "$red""Aborting firewall configuration to prevent security issues.""$reset"
-    exit 1
-end  # Added missing 'end' statement here
+    echo "$yellow""WARNING: The following networks referenced in firewall aren't defined yet:""$reset"
+    echo "$yellow""(string join ", " $missing_networks)""$reset"
+    echo "$yellow""Proceeding with firewall configuration anyway.""$reset"
+end  # Added missing end statement for this if block
 
-# Continue with forwarding rules - Enable forwarding to WAN for core, nexus, nodes, guest
-# Core to WAN (Internet access for ClosedWrt network)
+# Core Zone
+echo "$green""Adding Core Zone (trusted network)...""$reset"
+uci set firewall.core='zone'
+uci set firewall.core.name='core'
+uci set firewall.core.network='core'
+uci set firewall.core.input='ACCEPT'
+uci set firewall.core.output='ACCEPT'
+uci set firewall.core.forward='REJECT'
+
+# Guest Zone
+echo "$green""Adding Guest Zone (untrusted network)...""$reset"
+uci set firewall.guest='zone'
+uci set firewall.guest.name='guest'
+uci set firewall.guest.network='guest'
+uci set firewall.guest.input='DROP'
+uci set firewall.guest.output='ACCEPT'
+uci set firewall.guest.forward='REJECT'
+
+# IoT Zone
+echo "$green""Adding IoT Zone...""$reset"
+uci set firewall.iot='zone'
+uci set firewall.iot.name='iot'
+uci set firewall.iot.network='iot'
+uci set firewall.iot.input='DROP'
+uci set firewall.iot.output='DROP'
+uci set firewall.iot.forward='REJECT'
+
+# Meta Zone
+echo "$green""Adding Meta Zone...""$reset"
+uci set firewall.meta='zone'
+uci set firewall.meta.name='meta'
+uci set firewall.meta.network='meta'
+uci set firewall.meta.input='DROP'
+uci set firewall.meta.output='DROP'
+uci set firewall.meta.forward='REJECT'
+
+# Nexus Zone
+echo "$green""Adding Nexus Zone...""$reset"
+uci set firewall.nexus='zone'
+uci set firewall.nexus.name='nexus'
+uci set firewall.nexus.network='nexus'
+uci set firewall.nexus.input='DROP'
+uci set firewall.nexus.output='ACCEPT'
+uci set firewall.nexus.forward='REJECT'
+
+# Nodes Zone
+echo "$green""Adding Nodes Zone...""$reset"
+uci set firewall.nodes='zone'
+uci set firewall.nodes.name='nodes'
+uci set firewall.nodes.network='nodes'
+uci set firewall.nodes.input='DROP'
+uci set firewall.nodes.output='ACCEPT'
+uci set firewall.nodes.forward='REJECT'
+
+# WireGuard Zone
+echo "$green""Adding WireGuard Zone...""$reset"
+uci set firewall.wireguard='zone'
+uci set firewall.wireguard.name='wireguard'
+uci set firewall.wireguard.network='wireguard'
+uci set firewall.wireguard.input='DROP'
+uci set firewall.wireguard.output='ACCEPT'
+uci set firewall.wireguard.forward='REJECT'
+
+# WAN Zone
+echo "$green""Adding WAN Zone...""$reset"
+uci set firewall.wan_zone='zone'
+uci set firewall.wan_zone.name='wan'
+uci set firewall.wan_zone.network='wan wan6'
+uci set firewall.wan_zone.input='DROP'  # Default input policy is DROP
+uci set firewall.wan_zone.output='ACCEPT'
+uci set firewall.wan_zone.forward='DROP'
+uci set firewall.wan_zone.masq='1'  # Keep NAT enabled
+
+# Add a high-priority traffic rule to enforce the DROP policy on WAN input
+echo "$green""Adding traffic rule to enforce DROP policy on WAN input...""$reset"
+uci set firewall.enforce_wan_input='rule'
+uci set firewall.enforce_wan_input.name='Enforce-WAN-Input-Policy'
+uci set firewall.enforce_wan_input.src='wan'
+uci set firewall.enforce_wan_input.dest='*'
+uci set firewall.enforce_wan_input.proto='all'
+uci set firewall.enforce_wan_input.target='DROP'
+uci set firewall.enforce_wan_input.priority='5'  # High priority, but lower than anti-lockout
+uci set firewall.enforce_wan_input.enabled='1'
+
+### SECTION 6: ZONE FORWARDING RULES ###
+echo "$blue""Configuring zone forwarding rules...""$reset"
+
+# Core to WAN
 echo "$green""Adding forwarding from Core to WAN...""$reset"
 uci set firewall.forward_core_to_wan='forwarding'
 uci set firewall.forward_core_to_wan.src='core'
 uci set firewall.forward_core_to_wan.dest='wan'
 
-# Guest to WAN (Internet access for OpenWrt network)
-echo "$green""Adding forwarding from Guest to WAN for internet access...""$reset"
+# Guest to WAN
+echo "$green""Adding forwarding from Guest to WAN...""$reset"
 uci set firewall.forward_guest_to_wan='forwarding'
 uci set firewall.forward_guest_to_wan.src='guest'
 uci set firewall.forward_guest_to_wan.dest='wan'
 
-# Nexus to WAN (Internet access for Nexus network)
-echo "$green""Adding forwarding from Nexus to WAN for internet access...""$reset"
+# Nexus to WAN
+echo "$green""Adding forwarding from Nexus to WAN...""$reset"
 uci set firewall.forward_nexus_to_wan='forwarding'
 uci set firewall.forward_nexus_to_wan.src='nexus'
 uci set firewall.forward_nexus_to_wan.dest='wan'
 
-# Nodes to WAN (Internet access for Nodes network)
-echo "$green""Adding forwarding from Nodes to WAN for internet access...""$reset"
+# Nodes to WAN
+echo "$green""Adding forwarding from Nodes to WAN...""$reset"
 uci set firewall.forward_nodes_to_wan='forwarding'
 uci set firewall.forward_nodes_to_wan.src='nodes'
 uci set firewall.forward_nodes_to_wan.dest='wan'
 
-# IoT to WAN (Internet access for IoT network)
-echo "$green""Adding forwarding from IoT to WAN for internet access (disabled by default)...""$reset"
-uci set firewall.forward_iot_to_wan='forwarding'
-uci set firewall.forward_iot_to_wan.src='iot'
-uci set firewall.forward_iot_to_wan.dest='wan'
-uci set firewall.forward_iot_to_wan.enabled='0'  # Disabled by default
-
-# Meta to WAN (Internet access for Meta network)
-echo "$green""Adding forwarding from Meta to WAN for internet access (disabled by default)...""$reset"
-uci set firewall.forward_meta_to_wan='forwarding'
-uci set firewall.forward_meta_to_wan.src='meta'
-uci set firewall.forward_meta_to_wan.dest='wan'
-uci set firewall.forward_meta_to_wan.enabled='0'  # Disabled by default
-
-# Core to Nexus forwarding (allow core network to access Nexus network)
-echo "$green""Adding forwarding from Core to Nexus...""$reset"
-uci set firewall.forward_core_to_nexus='forwarding'
-uci set firewall.forward_core_to_nexus.src='core'
-uci set firewall.forward_core_to_nexus.dest='nexus'
-
-# Core to Nodes forwarding (allow core network to access Nodes network)
-echo "$green""Adding forwarding from Core to Nodes...""$reset"
-uci set firewall.forward_core_to_nodes='forwarding'
-uci set firewall.forward_core_to_nodes.src='core'
-uci set firewall.forward_core_to_nodes.dest='nodes'
-
-# Allow all zones to get DHCP, even without internet access
-echo "$blue""Adding DHCP access rules for all other zones (without internet access)...""$reset"
-
-# For IoT network
-echo "$green""Adding DHCP access for IoT network...""$reset"
-uci set firewall.allow_dhcp_iot='rule'
-uci set firewall.allow_dhcp_iot.name='Allow-DHCP-IoT'
-uci set firewall.allow_dhcp_iot.src='iot'
-uci set firewall.allow_dhcp_iot.proto='udp'
-uci set firewall.allow_dhcp_iot.dest_port='67 68'
-uci set firewall.allow_dhcp_iot.target='ACCEPT'
-
-# For Meta network
-echo "$green""Adding DHCP access for Meta network...""$reset"
-uci set firewall.allow_dhcp_meta='rule'
-uci set firewall.allow_dhcp_meta.name='Allow-DHCP-Meta'
-uci set firewall.allow_dhcp_meta.src='meta'
-uci set firewall.allow_dhcp_meta.proto='udp'
-uci set firewall.allow_dhcp_meta.dest_port='67 68'
-uci set firewall.allow_dhcp_meta.target='ACCEPT'
-
-# For Nexus network
-echo "$green""Adding DHCP access for Nexus network...""$reset"
-uci set firewall.allow_dhcp_nexus='rule'
-uci set firewall.allow_dhcp_nexus.name='Allow-DHCP-Nexus'
-uci set firewall.allow_dhcp_nexus.src='nexus'
-uci set firewall.allow_dhcp_nexus.proto='udp'
-uci set firewall.allow_dhcp_nexus.dest_port='67 68'
-uci set firewall.allow_dhcp_nexus.target='ACCEPT'
-
-# For Nodes network
-echo "$green""Adding DHCP access for Nodes network...""$reset"
-uci set firewall.allow_dhcp_nodes='rule'
-uci set firewall.allow_dhcp_nodes.name='Allow-DHCP-Nodes'
-uci set firewall.allow_dhcp_nodes.src='nodes'
-uci set firewall.allow_dhcp_nodes.proto='udp'
-uci set firewall.allow_dhcp_nodes.dest_port='67 68'
-uci set firewall.allow_dhcp_nodes.target='ACCEPT'
-
-######################################
-# SECTION 4: DNS CONFIGURATION RULES
-######################################
-
-echo "$blue""Configuring DNS rules and enforcement...""$reset"
-
-# Allow DNS for guest network specifically
-echo "$green""Adding DNS access for guest network...""$reset"
-uci set firewall.allow_dns_guest='rule'
-uci set firewall.allow_dns_guest.name='Allow-DNS-Guest'
-uci set firewall.allow_dns_guest.src='guest'
-uci set firewall.allow_dns_guest.proto='tcp udp'
-uci set firewall.allow_dns_guest.dest_port='53'
-uci set firewall.allow_dns_guest.target='ACCEPT'
-uci set firewall.allow_dns_guest.enabled='1'
-
-# DNS enforcement - force all clients to use router DNS
-echo "$blue""Adding DNS enforcement rules to redirect all DNS queries to router...""$reset"
-
-# Add per-zone rules for DNS redirection
-for zone in core nexus nodes meta iot guest
-  echo "$green""Creating NAT rules to redirect DNS traffic to router for zone $zone...""$reset"
-  
-  # DNS UDP Rule with named section to prevent duplicates
-  set redirect_name_udp "redirect_dns_udp_$zone"
-  uci set firewall.$redirect_name_udp='redirect'
-  uci set firewall.$redirect_name_udp.name="Redirect-DNS-UDP-$zone"
-  uci set firewall.$redirect_name_udp.src="$zone"
-  uci set firewall.$redirect_name_udp.proto='udp'
-  uci set firewall.$redirect_name_udp.src_dport='53'
-  uci set firewall.$redirect_name_udp.dest_port='53'
-  uci set firewall.$redirect_name_udp.target='DNAT'
-
-  # DNS TCP Rule with named section to prevent duplicates
-  set redirect_name_tcp "redirect_dns_tcp_$zone"
-  uci set firewall.$redirect_name_tcp='redirect'
-  uci set firewall.$redirect_name_tcp.name="Redirect-DNS-TCP-$zone"
-  uci set firewall.$redirect_name_tcp.src="$zone"
-  uci set firewall.$redirect_name_tcp.proto='tcp'
-  uci set firewall.$redirect_name_tcp.src_dport='53'
-  uci set firewall.$redirect_name_tcp.dest_port='53'
-  uci set firewall.$redirect_name_tcp.target='DNAT'
+# Core to all other internal zones
+echo "$green""Adding forwarding from Core to other internal zones...""$reset"
+for zone in nexus nodes meta iot
+    uci set firewall."forward_core_to_$zone"='forwarding'
+    uci set firewall."forward_core_to_$zone".src='core'
+    uci set firewall."forward_core_to_$zone".dest="$zone"
 end
 
-# Block direct external DNS with named section to prevent duplicates
-echo "$blue""Blocking direct external DNS access except from router...""$reset"
+# Allow forwarding from WireGuard to LAN zones
+echo "$green""Adding forwarding from WireGuard to LAN zones...""$reset"
+uci set firewall.forward_wg_to_lan='forwarding'
+uci set firewall.forward_wg_to_lan.src='wireguard'
+uci set firewall.forward_wg_to_lan.dest='core nexus nodes meta iot guest'
+
+# ADD THIS: Allow forwarding from WireGuard to WAN
+echo "$green""Adding forwarding from WireGuard to WAN...""$reset"
+uci set firewall.forward_wg_to_wan='forwarding'
+uci set firewall.forward_wg_to_wan.src='wireguard'
+uci set firewall.forward_wg_to_wan.dest='wan'
+
+### SECTION 7: DNS ACCESS RULES ###
+echo "$blue""Configuring DNS rules...""$reset"
+
+# Add per-zone rules for DNS access and redirection
+for zone in core nexus nodes meta iot guest wireguard  # Added wireguard to the loop
+  echo "$green""Creating DNS rules for zone $zone...""$reset"
+  
+  # Allow DNS access
+  uci set firewall."allow_dns_$zone"='rule'
+  uci set firewall."allow_dns_$zone".name="Allow-DNS-$zone"
+  uci set firewall."allow_dns_$zone".src="$zone"
+  uci set firewall."allow_dns_$zone".proto='tcp udp'
+  uci set firewall."allow_dns_$zone".dest_port='53'
+  uci set firewall."allow_dns_$zone".target='ACCEPT'
+  uci set firewall."allow_dns_$zone".enabled='1'
+  
+  # DNS UDP redirection
+  uci set firewall."redirect_dns_udp_$zone"='redirect'
+  uci set firewall."redirect_dns_udp_$zone".name="Redirect-DNS-UDP-$zone"
+  uci set firewall."redirect_dns_udp_$zone".src="$zone"
+  uci set firewall."redirect_dns_udp_$zone".proto='udp'
+  uci set firewall."redirect_dns_udp_$zone".src_dport='53'
+  uci set firewall."redirect_dns_udp_$zone".dest_port='53'
+  uci set firewall."redirect_dns_udp_$zone".target='DNAT'
+
+  # DNS TCP redirection
+  uci set firewall."redirect_dns_tcp_$zone"='redirect'
+  uci set firewall."redirect_dns_tcp_$zone".name="Redirect-DNS-TCP-$zone"
+  uci set firewall."redirect_dns_tcp_$zone".src="$zone"
+  uci set firewall."redirect_dns_tcp_$zone".proto='tcp'
+  uci set firewall."redirect_dns_tcp_$zone".src_dport='53'
+  uci set firewall."redirect_dns_tcp_$zone".dest_port='53'
+  uci set firewall."redirect_dns_tcp_$zone".target='DNAT'
+end
+
+# Block direct external DNS
+echo "$blue""Blocking direct external DNS access...""$reset"
 uci set firewall.block_external_dns='rule'
 uci set firewall.block_external_dns.name='Block-External-DNS'
 uci set firewall.block_external_dns.src='*'
@@ -540,30 +383,11 @@ uci set firewall.block_external_dns.dest_port='53'
 uci set firewall.block_external_dns.target='REJECT'
 uci set firewall.block_external_dns.enabled='1'
 
-#########################################
-# SECTION 5: SERVICE & PROTOCOL RULES
-#########################################
-
-echo "$blue""Configuring service and protocol specific rules...""$reset"
-
-# Guest DHCP rule - Allow guest network to get DHCP addresses
-echo "$green""Adding rule to allow guest network to acquire DHCP addresses...""$reset"
-uci set firewall.allow_dhcp_guest='rule'
-uci set firewall.allow_dhcp_guest.name='Allow-DHCP-Guest'
-uci set firewall.allow_dhcp_guest.src='guest'
-uci set firewall.allow_dhcp_guest.proto='udp'
-uci set firewall.allow_dhcp_guest.dest_port='67 68'
-uci set firewall.allow_dhcp_guest.target='ACCEPT'
-uci set firewall.allow_dhcp_guest.enabled='1'
-
-#######################################
-# SECTION 6: PORT FORWARDING RULES
-#######################################
-
-echo "$blue""Configuring port forwarding rules...""$reset"
+### SECTION 8: WIREGUARD PORT FORWARDING ###
+echo "$blue""Configuring WireGuard port forwarding...""$reset"
 
 # Port Forward: WAN -> WireGuard
-echo "$green""Adding port forward from WAN to WireGuard ($WIREGUARD_IP)...""$reset"
+echo "$green""Adding port forward from WAN to WireGuard...""$reset"
 uci set firewall.port_forward_wan_to_wg='redirect'
 uci set firewall.port_forward_wan_to_wg.name='PortForwardWANtoWG'
 uci set firewall.port_forward_wan_to_wg.src='wan'
@@ -571,12 +395,26 @@ uci set firewall.port_forward_wan_to_wg.src_dport='52018'
 uci set firewall.port_forward_wan_to_wg.dest='wireguard'
 uci set firewall.port_forward_wan_to_wg.dest_ip="$WIREGUARD_IP"
 uci set firewall.port_forward_wan_to_wg.proto='udp'
-uci set firewall.port_forward_wan_to_wg.enabled='1'  # Change from '0' to '1' to enable by default
+uci set firewall.port_forward_wan_to_wg.enabled='1'
 
-#############################
-# SECTION 7: FINALIZE
-#############################
+### SECTION 9: VERIFICATION ###
+echo "$purple""Verifying firewall configuration...""$reset"
 
-# Log completion of script
-# Note: UCI commits are handled by the parent script
+# List critical rules to verify they exist
+echo "$blue""Critical anti-lockout rules:""$reset"
+uci show firewall.allow_established
+uci show firewall.mgmt_access
+uci show firewall.ssh_from_core
+uci show firewall.ssh_from_wireguard
+
+echo "$blue""Critical DHCP rules:""$reset"
+uci show firewall.allow_dhcp
+uci show firewall.allow_dhcp_renew
+
+echo "$blue""Critical zone configurations:""$reset"
+uci show firewall.core
+uci show firewall.wan_zone
+uci show firewall.wireguard
+
+# Finished
 echo "$green""Firewall configuration completed successfully. Changes will be applied during final commit.""$reset"
