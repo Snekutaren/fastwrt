@@ -26,6 +26,14 @@ else
     exit 1
 end
 
+# Add support for alternative config directory structure (future implementation)
+# This will allow loading configuration from a modular directory structure
+if test -d "$BASE_DIR/config" -a -f "$BASE_DIR/config/config_paths.fish"
+    # Future implementation will load from structured config directories
+    echo "$yellow""Modular configuration directory detected - this feature will be supported in a future update""$reset"
+    # To be implemented: source "$BASE_DIR/config/config_paths.fish"
+end
+
 # Add debugging statements to log variable values
 if test "$DEBUG" = "true"
     echo "$yellow""SSID_OPENWRT: $SSID_OPENWRT""$reset"
@@ -45,12 +53,16 @@ else
     echo "$blue""- $SSID_METAWRT""$reset"
 end
 
-# Clear existing wireless interfaces
+# Clear existing wireless interfaces with improved output
+set wifi_iface_count 0
 echo "$blue""Clearing existing wireless configuration...""$reset"
-while uci -q delete wireless.@wifi-iface[0] > /dev/null 2>&1
-    echo "$yellow""Deleted wireless.@wifi-iface[0].""$reset"
+while uci -q delete wireless.@wifi-iface[0] > /dev/null
+  set wifi_iface_count (math $wifi_iface_count + 1)
+  if test "$DEBUG" = "true"
+    echo "$yellow""Deleted wireless.@wifi-iface[0]""$reset"
+  end
 end
-echo "$green""All wifi-iface entries cleared.""$reset"
+echo "$green""Cleared $wifi_iface_count wireless interface entries""$reset"
 
 # Configure 2.4GHz radio
 echo "$blue""Configuring 2.4GHz radio (radio0)...""$reset"
@@ -107,12 +119,12 @@ uci set wireless.wifinet0.device='radio0'
 uci set wireless.wifinet0.mode='ap'
 uci set wireless.wifinet0.ssid="$SSID_IOTWRT"
 uci set wireless.wifinet0.key="$PASSPHRASE_IOTWRT"
-uci set wireless.wifinet0.encryption='psk2'
+uci set wireless.wifinet0.encryption='psk2'  # WPA2-PSK encryption
 uci set wireless.wifinet0.network='iot'  # Connect to IOT network
 
-# Initialize macfilter to 'disable' by default - devices can connect initially
+# Initialize macfilter to 'disable' by default - will be enabled later in script
 uci set wireless.wifinet0.macfilter='disable'
-echo "$green""IoT network assigned""$reset"
+echo "$green""IoT network assigned with WPA2-PSK encryption (MAC filtering will be enabled)""$reset"
 
 # Assign OpenWrt to guest network on both radios
 echo "$blue""Configuring OpenWrt SSID on both radios...""$reset"
@@ -121,7 +133,7 @@ uci set wireless.wifinet1.device='radio0'
 uci set wireless.wifinet1.mode='ap'
 uci set wireless.wifinet1.ssid="$SSID_OPENWRT"
 uci set wireless.wifinet1.key="$PASSPHRASE_OPENWRT"
-uci set wireless.wifinet1.encryption='psk2'
+uci set wireless.wifinet1.encryption='psk2'  # WPA2-PSK encryption
 uci set wireless.wifinet1.network='guest'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet1.macfilter='disable'
@@ -131,11 +143,11 @@ uci set wireless.wifinet2.device='radio1'
 uci set wireless.wifinet2.mode='ap'
 uci set wireless.wifinet2.ssid="$SSID_OPENWRT"
 uci set wireless.wifinet2.key="$PASSPHRASE_OPENWRT"
-uci set wireless.wifinet2.encryption='psk2'
+uci set wireless.wifinet2.encryption='psk2'  # WPA2-PSK encryption
 uci set wireless.wifinet2.network='guest'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet2.macfilter='disable'
-echo "$green""OpenWrt assigned""$reset"
+echo "$green""OpenWrt assigned with WPA2-PSK encryption""$reset"
 
 # Assign ClosedWrt to core network on both radios
 echo "$blue""Configuring ClosedWrt SSID on both radios...""$reset"
@@ -144,7 +156,7 @@ uci set wireless.wifinet3.device='radio0'
 uci set wireless.wifinet3.mode='ap'
 uci set wireless.wifinet3.ssid="$SSID_CLOSEDWRT"
 uci set wireless.wifinet3.key="$PASSPHRASE_CLOSEDWRT"
-uci set wireless.wifinet3.encryption='psk2'
+uci set wireless.wifinet3.encryption='psk2'  # WPA2-PSK encryption
 uci set wireless.wifinet3.network='core'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet3.macfilter='disable'
@@ -154,11 +166,11 @@ uci set wireless.wifinet4.device='radio1'
 uci set wireless.wifinet4.mode='ap'
 uci set wireless.wifinet4.ssid="$SSID_CLOSEDWRT"
 uci set wireless.wifinet4.key="$PASSPHRASE_CLOSEDWRT"
-uci set wireless.wifinet4.encryption='psk2'
+uci set wireless.wifinet4.encryption='psk2'  # WPA2-PSK encryption
 uci set wireless.wifinet4.network='core'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet4.macfilter='disable'
-echo "$green""ClosedWrt assigned""$reset"
+echo "$green""ClosedWrt assigned with WPA2-PSK encryption""$reset"
 
 # Assign MetaWrt to 5G radio only
 echo "$blue""Configuring MetaWrt SSID on 5G radio...""$reset"
@@ -167,11 +179,11 @@ uci set wireless.wifinet5.device='radio1'
 uci set wireless.wifinet5.mode='ap'
 uci set wireless.wifinet5.ssid="$SSID_METAWRT"
 uci set wireless.wifinet5.key="$PASSPHRASE_METAWRT"
-uci set wireless.wifinet5.encryption='psk2'
+uci set wireless.wifinet5.encryption='sae'  # WPA3 encryption (SAE)
 uci set wireless.wifinet5.network='meta'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet5.macfilter='disable'
-echo "$green""MetaWrt assigned""$reset"
+echo "$green""MetaWrt assigned with WPA3-SAE encryption""$reset"
 
 # Enable 2G radio
 echo "$blue""[INFO] Enabling 2G radio...""$reset"
@@ -183,10 +195,17 @@ echo "$blue""[INFO] Enabling 5G radio...""$reset"
 uci set wireless.radio1.disabled='0'
 echo "$green""[SUCCESS] 5G radio enabled successfully.""$reset"
 
-# Process the maclist file line by line
+# Add debug-conditional processing for MAC list
 set MACLIST_PATH "$BASE_DIR/maclist.csv"
 if test -f "$MACLIST_PATH"
-  echo "$green""Maclist file found at: $MACLIST_PATH""$reset"
+  echo "$green""Processing MAC filters from maclist.csv...""$reset"
+  set mac_processing_errors 0
+  set core_macs_count 0
+  
+  # First pass for core devices - reduce output unless debugging
+  if test "$DEBUG" = "true"
+    echo "$blue""First pass: identifying core devices...""$reset"
+  end
   
   # First, collect all core/ClosedWrt MAC addresses
   set core_macs
@@ -308,61 +327,92 @@ if test -f "$MACLIST_PATH"
     uci add_list wireless.wifinet5.maclist="$mac"
   end
   
+  # Always show summary stats
+  echo "$green""Processed MAC filtering: added $core_macs_count core devices to all networks""$reset"
   if test $mac_processing_errors -gt 0
-    echo "$yellow""Completed MAC processing with $mac_processing_errors warnings""$reset"
-  else
-    echo "$green""MAC processing completed successfully""$reset"
+    echo "$yellow""Encountered $mac_processing_errors errors in MAC processing""$reset"
+    if test "$DEBUG" != "true"
+      echo "$yellow""Run with --debug for detailed error information""$reset"
+    end
   end
 else
   echo "$red""Maclist file not found at: $MACLIST_PATH""$reset"
 end
 
-# Directly enable MAC filtering if the flag is set to true
-if test "$ENABLE_MAC_FILTERING" = true
-  echo "$yellow""MAC filtering enabled by configuration, activating it now...""$reset"
-  uci set wireless.wifinet0.macfilter='allow'
-  uci set wireless.wifinet1.macfilter='allow'
-  uci set wireless.wifinet2.macfilter='allow'
-  uci set wireless.wifinet3.macfilter='allow'
-  uci set wireless.wifinet4.macfilter='allow'
-  uci set wireless.wifinet5.macfilter='allow'
-  echo "$green""MAC filtering has been enabled. Only devices in the maclist will be allowed to connect.""$reset"
-else
-  echo "$yellow""MAC filtering is disabled by configuration.""$reset"
-  echo "$yellow""To enable it later, run enable_mac_filtering.sh script.""$reset"
-end
+# Directly enable MAC filtering by default
+echo "$yellow""Enabling MAC filtering for all wireless networks...""$reset"
+uci set wireless.wifinet0.macfilter='allow'
+uci set wireless.wifinet1.macfilter='allow'
+uci set wireless.wifinet2.macfilter='allow'
+uci set wireless.wifinet3.macfilter='allow'
+uci set wireless.wifinet4.macfilter='allow'
+uci set wireless.wifinet5.macfilter='allow'
+echo "$green""MAC filtering has been enabled. Only devices in the maclist will be allowed to connect.""$reset"
 
-# Create enable_mac_filtering script for later activation
-echo "$blue""Creating utility script to enable MAC filtering when ready...""$reset"
-echo '#!/usr/bin/fish
-# MAC filtering activation script
+# Still create the enable_mac_filtering script for reference/restoration purposes,
+# but don't advertise it in normal output
+if test "$DEBUG" = "true"
+    echo "$blue""Creating utility script to manage MAC filtering...""$reset"
+    echo '#!/usr/bin/fish
+# MAC filtering management script
 
 # Set colors for readability
 set green (echo -e "\033[0;32m")
 set yellow (echo -e "\033[0;33m")
+set red (echo -e "\033[0;31m")
 set blue (echo -e "\033[0;34m")
 set reset (echo -e "\033[0m")
 
-echo "$blue""Starting MAC filtering activation script...""$reset"
-
-# Configure wireless interfaces to use the MAC filtering
-echo "$yellow""Setting MAC filters to allow mode...""$reset"
-uci set wireless.wifinet0.macfilter="allow"
-uci set wireless.wifinet1.macfilter="allow"
-uci set wireless.wifinet2.macfilter="allow"
-uci set wireless.wifinet3.macfilter="allow"
-uci set wireless.wifinet4.macfilter="allow"
-uci set wireless.wifinet5.macfilter="allow"
+if test "$1" = "enable"
+    echo "$blue""Enabling MAC filtering...""$reset"
+    uci set wireless.wifinet0.macfilter="allow"
+    uci set wireless.wifinet1.macfilter="allow"
+    uci set wireless.wifinet2.macfilter="allow"
+    uci set wireless.wifinet3.macfilter="allow"
+    uci set wireless.wifinet4.macfilter="allow"
+    uci set wireless.wifinet5.macfilter="allow"
+    echo "$green""MAC filtering enabled - only devices with allowed MAC addresses can connect""$reset"
+elif test "$1" = "disable"
+    echo "$red""Disabling MAC filtering...""$reset"
+    echo "$red""WARNING: This will allow ANY device to connect to your networks!""$reset"
+    echo "$yellow""Press Ctrl+C within 5 seconds to cancel...""$reset"
+    sleep 5
+    uci set wireless.wifinet0.macfilter="disable"
+    uci set wireless.wifinet1.macfilter="disable"
+    uci set wireless.wifinet2.macfilter="disable"
+    uci set wireless.wifinet3.macfilter="disable"
+    uci set wireless.wifinet4.macfilter="disable"
+    uci set wireless.wifinet5.macfilter="disable"
+    echo "$yellow""MAC filtering disabled - any device can now connect to your networks""$reset"
+else
+    echo "$blue""MAC Filtering Management Script""$reset"
+    echo "$yellow""Usage: $0 [enable|disable|status]""$reset"
+    echo "$yellow""  enable: Only allow devices with MAC addresses in maclist.csv""$reset"
+    echo "$yellow""  disable: Allow any device to connect (SECURITY RISK)""$reset"
+    echo "$yellow""  status: Show current MAC filtering status""$reset"
+    echo ""
+    echo "$blue""Current MAC filtering status:""$reset"
+    for i in 0 1 2 3 4 5
+        set status (uci -q get wireless.wifinet$i.macfilter)
+        if test "$status" = "allow"
+            echo "wifinet$i: $green""ENABLED (Secure)""$reset"
+        else
+            echo "wifinet$i: $red""DISABLED (Open)""$reset"
+        end
+    end
+    exit 0
+fi
 
 # Commit changes and reload wireless configuration
 uci commit wireless
 wifi reload
 
-echo "$green""MAC filtering has been enabled. Only devices in the maclist.csv will now be allowed to connect.""$reset"
-' > "$BASE_DIR/enable_mac_filtering.sh"
+echo "$blue""MAC filtering changes have been applied.""$reset"
+' > "$BASE_DIR/manage_mac_filtering.sh"
 
-chmod +x "$BASE_DIR/enable_mac_filtering.sh"
-echo "$green""Created utility script $BASE_DIR/enable_mac_filtering.sh to enable MAC filtering when ready.""$reset"
+    chmod +x "$BASE_DIR/manage_mac_filtering.sh"
+    echo "$green""Created utility script $BASE_DIR/manage_mac_filtering.sh to manage MAC filtering.""$reset"
+end
 
 # DEBUG
 # Add a check to ensure the network interface exists before assigning it
@@ -387,8 +437,6 @@ end
 # Note: UCI commits are handled in 98-commit.sh instead
 echo "$green""Wireless configuration changes complete. Changes will be applied during final commit.""$reset"
 
+# Final status message - simplified to just state the current status
 echo "$green""Wireless configuration script completed successfully.""$reset"
-echo "$yellow""NOTE: MAC filtering is currently ""$reset"(test "$ENABLE_MAC_FILTERING" = true && echo "ENABLED" || echo "DISABLED")"$yellow"". ""$reset"
-if test "$ENABLE_MAC_FILTERING" != true
-  echo "$yellow""Run enable_mac_filtering.sh when you're ready to activate it.""$reset"
-end
+echo "$green""MAC filtering is ENABLED. Only devices in the maclist.csv file can connect.""$reset"

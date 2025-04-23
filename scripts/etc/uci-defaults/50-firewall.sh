@@ -28,25 +28,55 @@ echo "$blue""Performing complete firewall reset...""$reset"
 # Clear all firewall configuration completely
 echo "$blue""Removing all existing firewall configuration...""$reset"
 
-# Clear redirects
+# Clear redirects with improved output
+set redirect_count 0
 while uci -q delete firewall.@redirect[0] > /dev/null
-  echo "$green""Deleted firewall.@redirect[0]""$reset"
+  set redirect_count (math $redirect_count + 1)
+  if test "$DEBUG" = "true"
+    echo "$green""Deleted firewall.@redirect[0]""$reset"
+  end
+end
+if test $redirect_count -gt 0
+  echo "$green""Deleted $redirect_count firewall redirects""$reset"
 end
 
-# Clear rules
+# Clear rules with improved output
+set rule_count 0
 while uci -q delete firewall.@rule[0] > /dev/null
-  echo "$green""Deleted firewall.@rule[0]""$reset"
+  set rule_count (math $rule_count + 1)
+  if test "$DEBUG" = "true"
+    echo "$green""Deleted firewall.@rule[0]""$reset"
+  end
+end
+if test $rule_count -gt 0
+  echo "$green""Deleted $rule_count firewall rules""$reset"
 end
 
-# Clear forwarding
+# Clear forwarding with improved output
+set forwarding_count 0
 while uci -q delete firewall.@forwarding[0] > /dev/null
-  echo "$green""Deleted firewall.@forwarding[0]""$reset"
+  set forwarding_count (math $forwarding_count + 1)
+  if test "$DEBUG" = "true"
+    echo "$green""Deleted firewall.@forwarding[0]""$reset"
+  end
+end
+if test $forwarding_count -gt 0
+  echo "$green""Deleted $forwarding_count firewall forwarding rules""$reset"
 end
 
-# Clear zones (except defaults)
+# Clear zones with improved output
+set zone_count 0
 while uci -q delete firewall.@zone[0] > /dev/null
-  echo "$green""Deleted firewall.@zone[0]""$reset"
+  set zone_count (math $zone_count + 1)
+  if test "$DEBUG" = "true"
+    echo "$green""Deleted firewall.@zone[0]""$reset"
+  end
 end
+if test $zone_count -gt 0
+  echo "$green""Deleted $zone_count firewall zones""$reset"
+end
+
+echo "$green""Firewall configuration cleanup completed""$reset"
 
 # Firewall Defaults (Drop All)
 echo "$blue""Setting global firewall defaults...""$reset"
@@ -270,14 +300,23 @@ uci set firewall.wireguard.output='ACCEPT'
 uci set firewall.wireguard.forward='REJECT'
 
 # WAN Zone
-echo "$green""Adding WAN Zone...""$reset"
+echo "$blue""Configuring WAN zone...""$reset"
 uci set firewall.wan_zone='zone'
 uci set firewall.wan_zone.name='wan'
-uci set firewall.wan_zone.network='wan wan6'
-uci set firewall.wan_zone.input='DROP'  # Default input policy is DROP
-uci set firewall.wan_zone.output='ACCEPT'
-uci set firewall.wan_zone.forward='DROP'
-uci set firewall.wan_zone.masq='1'  # Keep NAT enabled
+
+# Only include wan6 in networks list if IPv6 is enabled
+if test "$ENABLE_WAN6" = "true"
+    echo "$yellow""IPv6 is enabled, including wan6 in WAN zone""$reset"
+    uci set firewall.wan_zone.network='wan wan6'
+else
+    echo "$yellow""IPv6 is not enabled, only including wan in WAN zone""$reset"
+    uci set firewall.wan_zone.network='wan'
+end
+
+uci set firewall.wan_zone.input="$WAN_POLICY_IN"
+uci set firewall.wan_zone.output="$WAN_POLICY_OUT"
+uci set firewall.wan_zone.forward="$WAN_POLICY_FORWARD"
+uci set firewall.wan_zone.masq='1'
 
 # Add a high-priority traffic rule to enforce the DROP policy on WAN input
 echo "$green""Adding traffic rule to enforce DROP policy on WAN input...""$reset"

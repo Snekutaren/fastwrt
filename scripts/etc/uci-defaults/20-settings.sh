@@ -46,20 +46,16 @@ else
     echo "$yellow""Default shell doesn't appear to be /bin/ash, skipping modification""$reset"
 end  # Changed from 'fi' to 'end' for consistent fish shell syntax
 
-# Make sure fish is installed
-if command -v opkg > /dev/null 2>&1
-    echo "$blue""Checking if fish is installed...""$reset"
-    if not command -v fish > /dev/null 2>&1
-        echo "$yellow""Installing fish shell...""$reset"
-        opkg update
-        opkg install fish
-        echo "$green""Fish shell installed""$reset"
-    else
-        echo "$green""Fish shell is already installed""$reset"
-    end
+# Make sure fish is installed - CRITICAL REQUIREMENT
+echo "$blue""Verifying fish shell installation...""$reset"
+if not command -v fish > /dev/null 2>&1
+    echo "$red""ERROR: Fish shell is not installed!""$reset"
+    echo "$red""Fish shell is REQUIRED for FastWrt scripts to function properly.""$reset"
+    echo "$red""Please install fish shell first using: opkg update && opkg install fish""$reset"
+    exit 1
 else
-    echo "$yellow""opkg not available, skipping fish installation check""$reset"
-end  # Changed from 'fi' to 'end' for consistent fish shell syntax
+    echo "$green""Fish shell is properly installed""$reset"
+end
 
 # Create a symbolic link to ensure fish is available in PATH
 if test -f /usr/bin/fish; and not test -f /bin/fish
@@ -67,6 +63,21 @@ if test -f /usr/bin/fish; and not test -f /bin/fish
     ln -sf /usr/bin/fish /bin/fish
     echo "$green""Symbolic link created""$reset"
 end
+
+# Verify fish shell is actually running - CRITICAL CHECK
+echo "$blue""Verifying fish shell execution...""$reset"
+if test (basename (status -f)) = "20-settings.sh"
+    echo "$green""Confirmed: This script is running under fish shell""$reset"
+else
+    echo "$red""CRITICAL ERROR: This script is NOT running under fish shell!""$reset"
+    echo "$red""FastWrt requires all scripts to be executed with fish shell interpreter.""$reset"
+    echo "$red""Please run this script with: fish 20-settings.sh""$reset"
+    # No attempt to continue - we abort immediately
+    exit 1
+end
+
+# Verify the shell for future logins
+echo "$yellow""Default shell for future logins: ""$reset"(grep "^root:" /etc/passwd | cut -d: -f7)
 
 # Verify the changes were applied
 echo "$yellow""Verifying system settings...""$reset"

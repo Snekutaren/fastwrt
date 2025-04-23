@@ -48,12 +48,13 @@ end
 set SERVER_PRIVATE_KEY (cat "$SERVER_PRIVATE_KEY_FILE")
 set SERVER_PUBLIC_KEY (cat "$SERVER_PUBLIC_KEY_FILE")
 
-echo "$blue""Server public key: ""$reset"
+# Mask keys in normal output, show only in debug mode - using the EXACT same pattern as wireless keys
 if test "$DEBUG" = "true"
-    echo "$SERVER_PUBLIC_KEY"
+    echo "$blue""Server public key: ""$reset"$SERVER_PUBLIC_KEY
 else
-    echo "(hidden - run with --debug to reveal)"
+    echo "$blue""Server public key: ""$reset""[MASKED - use --debug to display]"
 end
+# Never display the private key, even in debug mode
 
 # Configure WireGuard interface directly (don't create separate section)
 echo "$blue""Configuring WireGuard interface parameters...""$reset"
@@ -67,7 +68,7 @@ uci set network.wireguard.addresses="$WIREGUARD_IP/24"
 # Create a few example client peers
 echo "$blue""Setting up example client peers...""$reset"
 
-# Function to add a peer with proper section naming
+# Function to add a peer with proper section naming - modified for S10 client
 function add_wireguard_peer
     set name $argv[1]
     set public_key $argv[2]
@@ -78,7 +79,7 @@ function add_wireguard_peer
     
     # Create a section named 'peer_$name' for better organization
     set section_name "peer_$name"
-    uci set network.$section_name='wireguard_peer'  # Changed from 'wireguard_wireguard_peer'
+    uci set network.$section_name='wireguard_peer'
     uci set network.$section_name.public_key="$public_key"
     uci set network.$section_name.allowed_ips="$allowed_ips"
     uci set network.$section_name.description="$name"
@@ -105,6 +106,25 @@ set EXAMPLE_CLIENT_PUBLIC_KEY "4H/Bhi5RevX5Rw5vQdE+MyDEDEXAMPLEPUBKEY1234567890=
 
 # Add client as peer - this would be done for each client device
 add_wireguard_peer "client1" "$EXAMPLE_CLIENT_PUBLIC_KEY" "10.255.0.2/32"
+
+# Add the hardcoded S10 client peer with the correct public key
+echo "$blue""Adding hardcoded client peer: S10...""$reset"
+add_wireguard_peer "S10" "79x+3JAe1T2/OW4UiuVmoVzy++f09u8Cgrbf8fsrJD0=" "10.255.0.2/32"
+
+# Use exactly the same masking pattern as the wireless keys
+if test "$DEBUG" = "true"
+    echo "$blue""S10 public key: ""$reset""79x+3JAe1T2/OW4UiuVmoVzy++f09u8Cgrbf8fsrJD0="
+end
+
+# Add wireguard_wireguard section using the same consistent pattern
+echo "$blue""Adding custom wireguard_wireguard section for S10...""$reset"
+uci add network wireguard_wireguard
+uci set network.@wireguard_wireguard[-1].description='S10'
+uci set network.@wireguard_wireguard[-1].public_key='79x+3JAe1T2/OW4UiuVmoVzy++f09u8Cgrbf8fsrJD0='
+
+if test "$DEBUG" = "true"
+    echo "$blue""S10 wireguard section public key: ""$reset""79x+3JAe1T2/OW4UiuVmoVzy++f09u8Cgrbf8fsrJD0="
+end
 
 # Set WireGuard DNS settings to use the VPN server as DNS
 echo "$blue""Configuring WireGuard to use internal DNS...""$reset"
@@ -192,12 +212,25 @@ if ! grep -q "repair-wireguard" /etc/crontabs/root 2>/dev/null
     echo "$green""Added WireGuard check to cron jobs""$reset"
 end  # Added missing end statement here
 
-# Verify configuration
+# Verify configuration - mask sensitive information in non-debug mode
 echo "$blue""Verifying WireGuard configuration...""$reset"
-uci show network | grep wireguard
+if test "$DEBUG" = "true"
+    # In debug mode, show full configuration
+    uci show network | grep wireguard
+else
+    # In regular mode, just confirm settings exist without showing keys
+    echo "$green""WireGuard interface configured""$reset"
+    echo "$blue""- Interface: ""$reset""wireguard"
+    echo "$blue""- IP address: ""$reset""$WIREGUARD_IP/24"
+    echo "$blue""- Port: ""$reset""52018"
+    echo "$blue""- Peers: ""$reset"(uci show network | grep wireguard_peer | wc -l)
+    echo "$yellow""Note: Use --debug flag to show full configuration details""$reset"
+end
 
-# Add status message about client configuration
-echo "$yellow""
+# Add status message about client configuration - with key masking
+if test "$DEBUG" = "true"
+    # Show full key in debug mode
+    echo "$yellow""
 WireGuard Client Configuration Info:
 -----------------------------------
 Server Public Key: $SERVER_PUBLIC_KEY
@@ -210,6 +243,22 @@ To configure clients:
 2. Add the client public key to the server (in this script)
 3. Set up client with server public key and endpoint
 ""$reset"
+else
+    # Mask key in normal mode
+    echo "$yellow""
+WireGuard Client Configuration Info:
+-----------------------------------
+Server Public Key: [MASKED - use --debug to show]
+Server Endpoint: <YOUR_PUBLIC_IP>:52018
+Allowed IPs: 0.0.0.0/0  # Route all traffic through VPN
+Client IP: 10.255.0.2/32
+
+To configure clients:
+1. Generate client keys with: wg genkey | tee client_private.key | wg pubkey > client_public.key
+2. Add the client public key to the server (in this script)
+3. Set up client with server public key and endpoint (use --debug to see keys)
+""$reset"
+end
 
 # Setup complete
 echo "$green""WireGuard configuration completed successfully.""$reset"

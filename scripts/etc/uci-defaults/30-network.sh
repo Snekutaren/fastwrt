@@ -18,84 +18,147 @@ echo "$blue""Current working directory: ""$reset"(pwd)
 echo "$green""Starting network configuration...""$reset"
 
 ### --- Network Configuration ---
-# Clean up existing configs (safely)
+# Clean up existing configs (using idempotent approach)
 echo "$blue""Cleaning up existing network configurations...""$reset"
+
+# First check which network interfaces actually exist
+set existing_interfaces
 for config in lan_dev wan_dev br-lan br-wan lan
-  echo "Attempting to delete network.$config..."
-  if uci delete network.$config 2>/dev/null
-    echo "$green""Deleted network.$config.""$reset"
-  else
-    echo "$yellow""Notice: network.$config not found, skipping deletion.""$reset"
-  end
+    if uci -q get network.$config > /dev/null 2>&1
+        set -a existing_interfaces $config
+    end
 end
+
+if test (count $existing_interfaces) -gt 0
+    echo "$yellow""Found ""$reset"(count $existing_interfaces)"$yellow"" existing network interfaces to clean up""$reset"
+    
+    # Now delete only the interfaces that actually exist
+    for config in $existing_interfaces
+        echo "$yellow""Deleting network.$config...""$reset"
+        uci delete network.$config
+        echo "$green""Deleted network.$config successfully""$reset"
+    end
+else
+    echo "$green""No existing network interfaces found that need cleanup""$reset"
+end
+
 echo "$green""Network configuration cleanup completed.""$reset"
 
-# Clean up orphaned device entries
-echo "$blue""Cleaning up orphaned device entries...""$reset"
-for device in (uci show network | grep -E '@device\[[0-9]+\]' | cut -d. -f2 | cut -d= -f1)
-  echo "Attempting to delete network.$device..."
-  if uci delete network."$device" 2>/dev/null
-    echo "$green""Deleted network.$device.""$reset"
-  else
-    echo "$yellow""Notice: network.$device not found, skipping deletion.""$reset"
-  end
+# Clean up orphaned device entries (also idempotently)
+echo "$blue""Checking for orphaned device entries...""$reset"
+set orphaned_devices
+for device in (uci show network 2>/dev/null | grep -E '@device\[[0-9]+\]' | cut -d. -f2 | cut -d= -f1)
+    set -a orphaned_devices $device
 end
+
+if test (count $orphaned_devices) -gt 0
+    echo "$yellow""Found ""$reset"(count $orphaned_devices)"$yellow"" orphaned device entries to clean up""$reset"
+    
+    # Delete each orphaned device
+    for device in $orphaned_devices
+        echo "$yellow""Deleting network.$device...""$reset"
+        uci delete network."$device"
+        echo "$green""Deleted network.$device successfully""$reset"
+    end
+else
+    echo "$green""No orphaned device entries found""$reset"
+end
+
 echo "$green""Orphaned device cleanup completed.""$reset"
 
-# Loopback (only if not already defined)
+# Loopback (only if not already defined) - idempotent approach
 echo "$blue""Configuring loopback interface...""$reset"
-if not uci get network.loopback > /dev/null 2>&1
+if not uci -q get network.loopback > /dev/null
+  echo "$yellow""Creating loopback interface configuration...""$reset"
   uci set network.loopback='interface'
   uci set network.loopback.device='lo'
   uci set network.loopback.proto='static'
   uci set network.loopback.ipaddr='127.0.0.1'
   uci set network.loopback.netmask='255.0.0.0'
-  echo "$green""Loopback interface configured.""$reset"
+  echo "$green""Loopback interface configured successfully.""$reset"
 else
-  echo "$yellow""Loopback interface already configured, skipping.""$reset"
+  echo "$green""Loopback interface already exists, no changes needed.""$reset"
 end
 
-# Global settings
+# Global settings - idempotent approach
 echo "$blue""Configuring global network settings...""$reset"
 uci set network.globals='globals'
 uci set network.globals.ula_prefix='fdd7:1414:1d85::/48'
 uci set network.globals.packet_steering='1'
-echo "$green""Global network settings configured.""$reset"
+echo "$green""Global network settings configured successfully.""$reset"
 
-# LAN Bridge (br-lan)
+# LAN Bridge (br-lan) - idempotent approach
 echo "$blue""Configuring LAN bridge (br-lan)...""$reset"
 uci set network.lan_dev='device'
 uci set network.lan_dev.name='br-lan'
 uci set network.lan_dev.type='bridge'
-echo "Cleaning up existing ports for LAN bridge to avoid duplicates..."
-if uci delete network.lan_dev.ports 2>/dev/null
-  echo "$green""Deleted network.lan_dev.ports.""$reset"
-else
-  echo "$yellow""Notice: network.lan_dev.ports not found, skipping deletion.""$reset"
-end
-# Adding logging for port additions
-for port in eth1 lan1 lan3 lan4 lan5
-  echo "Adding port $port to network.lan_dev.ports..."
-  uci add_list network.lan_dev.ports="$port"
-end
-echo "$green""LAN bridge (br-lan) configured successfully.""$reset"
 
-# WAN Bridge (br-wan)
+# First check if ports are already configured
+set current_ports (uci -q get network.lan_dev.ports 2>/dev/null | string split " ")
+if test (count $current_ports) -gt 0
+  # Only show detailed port info in debug mode
+  if test "$DEBUG" = "true"
+    echo "$yellow""Existing LAN ports found: ""$reset"(string join ", " $current_ports)
+  else
+    echo "$yellow""Reconfiguring existing LAN ports""$reset"
+  end
+  uci delete network.lan_dev.ports
+  echo "$green""Cleaned up existing LAN bridge ports.""$reset"
+end
+
+# Adding ports with proper logging
+set required_ports "eth1" "lan1" "lan3" "lan4" "lan5"
+# Only log individual port adds in debug mode
+if test "$DEBUG" = "true"
+  for port in $required_ports
+    echo "$blue""Adding port $port to LAN bridge...""$reset"
+    uci add_list network.lan_dev.ports="$port"
+  end
+else
+  # Simple summary in normal mode
+  echo "$blue""Adding ""$reset"(count $required_ports)"$blue"" ports to LAN bridge...""$reset"
+  for port in $required_ports
+    uci add_list network.lan_dev.ports="$port"
+  end
+end
+echo "$green""LAN bridge (br-lan) configured with ""$reset"(count $required_ports)"$green"" ports.""$reset"
+
+# WAN Bridge (br-wan) - idempotent approach
 echo "$blue""Configuring WAN bridge (br-wan)...""$reset"
 uci set network.wan_dev='device'
 uci set network.wan_dev.name='br-wan'
 uci set network.wan_dev.type='bridge'
-echo "Cleaning up existing ports for WAN bridge to avoid duplicates..."
-if uci delete network.wan_dev.ports 2>/dev/null
-  echo "$green""Deleted network.wan_dev.ports.""$reset"
-else
-  echo "$yellow""Notice: network.wan_dev.ports not found, skipping deletion.""$reset"
+
+# First check if ports are already configured
+set current_ports (uci -q get network.wan_dev.ports 2>/dev/null | string split " ")
+if test (count $current_ports) -gt 0
+  echo "$yellow""Existing WAN ports found: ""$reset"(string join ", " $current_ports)
+  uci delete network.wan_dev.ports
+  echo "$green""Cleaned up existing WAN bridge ports.""$reset"
 end
+
+# Add WAN port with proper logging
+echo "$blue""Adding port lan2 to WAN bridge...""$reset"
 uci add_list network.wan_dev.ports='lan2'
 echo "$green""WAN bridge (br-wan) configured successfully.""$reset"
 
-# Define all VLANs with properly structured data
+# Define all VLANs with properly structured data - idempotent approach
 echo "$purple""Configuring VLANs...""$reset"
+
+# First check for existing VLANs that might need cleanup
+set existing_vlans
+for vlan_id in 1 10 20 70 80 90
+  set vlan_name "vlan$vlan_id"
+  if uci -q get network.$vlan_name > /dev/null
+    set -a existing_vlans $vlan_name
+  end
+end
+
+if test (count $existing_vlans) -gt 0
+  echo "$yellow""Found ""$reset"(count $existing_vlans)"$yellow"" existing VLANs to clean up""$reset"
+  # Show which VLANs will be reconfigured
+  echo "$yellow""VLANs to be reconfigured: ""$reset"(string join ", " $existing_vlans)
+end
 
 # Define VLANs as an array with name, type, device, vlan ID, and ports
 # Format: "vlan_name type device vlan_id port1 port2 port3..."
@@ -120,7 +183,7 @@ set -l vlans \
   "vlan80 bridge-vlan br-lan 80 eth1:t lan1:t lan3:t lan4:t lan5:t" \
   "vlan90 bridge-vlan br-lan 90 eth1:t lan1:t lan3:t lan4:t lan5:t"
 
-# Process each VLAN definition
+# Process each VLAN definition - enhanced for idempotency
 for vlan in $vlans
   # Split the definition into parts
   set -l parts (string split " " -- "$vlan")
@@ -134,28 +197,55 @@ for vlan in $vlans
   # Extract ports - all remaining parts
   set -l ports $parts[5..-1]
 
-  echo "$blue""Configuring $name ($device.$id)...""$reset"
+  # Check if this VLAN already exists
+  set needs_create true
+  if uci -q get network.$name > /dev/null
+    echo "$yellow""VLAN $name already exists, reconfiguring...""$reset"
+    set needs_create false
+  else
+    echo "$blue""Creating new VLAN: $name ($device.$id)...""$reset"
+  end
+
+  # Configure the VLAN
   uci set network.$name="$type"
   uci set network.$name.device="$device"
   uci set network.$name.vlan="$id"
   
   # Clear existing ports
-  if uci delete network.$name.ports 2>/dev/null
-    echo "$green""Deleted network.$name.ports.""$reset"
-  else
-    echo "$yellow""Notice: network.$name.ports not found, skipping deletion.""$reset"
+  set current_ports (uci -q get network.$name.ports 2>/dev/null | string split " ")
+  if test (count $current_ports) -gt 0
+    echo "$yellow""Clearing existing ports for $name: ""$reset"(string join ", " $current_ports)
+    uci delete network.$name.ports
   end
   
   # Add ports one by one
   for port in $ports
-    echo "Adding port $port to network.$name.ports..."
+    echo "$blue""Adding port $port to $name...""$reset"
     uci add_list network.$name.ports="$port"
   end
-  echo "$green""$name configured successfully.""$reset"
+  
+  if test $needs_create = true
+    echo "$green""VLAN $name created successfully.""$reset"
+  else
+    echo "$green""VLAN $name reconfigured successfully.""$reset"
+  end
 end
 
-# After configuring VLANs, explicitly define all required interfaces
+# Define network interfaces mapped to VLANs - idempotent approach
 echo "$purple""Defining logical network interfaces...""$reset"
+
+# Check for existing interfaces that might be reconfigured
+set existing_interfaces
+for iface in core nexus nodes meta iot guest
+  if uci -q get network.$iface > /dev/null
+    set -a existing_interfaces $iface
+  end
+end
+
+if test (count $existing_interfaces) -gt 0
+  echo "$yellow""Found ""$reset"(count $existing_interfaces)"$yellow"" existing interfaces to reconfigure""$reset"
+  echo "$yellow""Interfaces to be reconfigured: ""$reset"(string join ", " $existing_interfaces)
+end
 
 # Define network interfaces mapped to VLANs
 set -l interfaces \
@@ -166,7 +256,7 @@ set -l interfaces \
   "iot static br-lan.80 10.0.80.1 255.255.255.0" \
   "guest static br-lan.90 192.168.90.1 255.255.255.0"
 
-# Process each interface
+# Process each interface - enhanced for idempotency
 for iface in $interfaces
   set -l parts (string split " " -- "$iface")
   set -l name $parts[1]
@@ -175,27 +265,46 @@ for iface in $interfaces
   set -l ipaddr $parts[4]
   set -l netmask $parts[5]
 
-  echo "$blue""Configuring interface $name on device $device with IP $ipaddr/$netmask...""$reset"
+  # Check if interface already exists
+  if uci -q get network.$name > /dev/null
+    echo "$yellow""Interface $name already exists, reconfiguring...""$reset"
+  else
+    echo "$blue""Creating new interface: $name...""$reset"
+  end
+
+  # Configure the interface
   uci set network.$name='interface'
   uci set network.$name.proto="$proto"
   uci set network.$name.device="$device"
   uci set network.$name.ipaddr="$ipaddr"
   uci set network.$name.netmask="$netmask"
-  echo "$green""$name interface configured successfully.""$reset"
+  echo "$green""Interface $name configured successfully: $ipaddr/$netmask on $device""$reset"
 end
 
-# WAN interface (for internet connectivity)
+# WAN interface - idempotent approach
 echo "$blue""Configuring WAN interface...""$reset"
+if uci -q get network.wan > /dev/null
+  echo "$yellow""WAN interface already exists, reconfiguring...""$reset"
+else
+  echo "$blue""Creating new WAN interface...""$reset"
+end
 uci set network.wan='interface'
 uci set network.wan.proto='dhcp'
 uci set network.wan.device='br-wan'
+echo "$green""WAN interface configured successfully.""$reset"
 
-# WireGuard interface (if needed)
+# WireGuard interface - idempotent approach
 echo "$blue""Configuring WireGuard interface...""$reset"
+if uci -q get network.wireguard > /dev/null
+  echo "$yellow""WireGuard interface already exists, reconfiguring...""$reset"
+else
+  echo "$blue""Creating new WireGuard interface...""$reset"
+end
 uci set network.wireguard='interface'
 uci set network.wireguard.proto='wireguard'
 uci set network.wireguard.ipaddr="$WIREGUARD_IP"
 uci set network.wireguard.netmask='255.255.255.0'
+echo "$green""WireGuard interface configured successfully.""$reset"
 
 # Important: Don't commit here - the parent script (01-install.sh) or
 # another dedicated script handles committing changes after all configurations

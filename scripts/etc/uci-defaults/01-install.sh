@@ -295,6 +295,80 @@ if test "$overall_success" = "false"; or test "$DRY_RUN" = "true"
     end
 end
 
+# Dry run mode - show only a concise summary of changes
+if test "$DRY_RUN" = "true"
+    echo "$yellow""--- DRY RUN: Configuration summary ---""$reset"
+    
+    # Get count of modified UCI configurations - safely handling negative entries
+    set modified_configs (uci changes | grep -v "^-" | cut -d. -f1 | sort -u)
+    set total_changes (uci changes | wc -l)
+    
+    # Handle negative entries safely - avoid using echo pipe to grep which causes errors
+    set negative_entries (uci changes | grep "^-" | cut -d. -f1 | sort -u 2>/dev/null)
+    set dhcp_neg_count 0
+    set firewall_neg_count 0
+    set network_neg_count 0
+    set wireless_neg_count 0
+    
+    # Count negative entries by looping through them directly
+    for entry in $negative_entries
+        if string match -q "*dhcp*" -- $entry
+            set dhcp_neg_count (math $dhcp_neg_count + 1)
+        else if string match -q "*firewall*" -- $entry
+            set firewall_neg_count (math $firewall_neg_count + 1)
+        else if string match -q "*network*" -- $entry
+            set network_neg_count (math $network_neg_count + 1)
+        else if string match -q "*wireless*" -- $entry
+            set wireless_neg_count (math $wireless_neg_count + 1)
+        end
+    end
+    
+    # Only show the detailed changes in debug mode
+    if test "$DEBUG" = "true"
+        echo "$yellow""--- DETAILED UCI CHANGES (debug mode) ---""$reset"
+        # Only attempt to show positive entries that won't cause errors
+        for config in $modified_configs
+            echo "$blue""Changes in $config:""$reset"
+            uci changes $config
+            echo ""
+        end
+        
+        # Show the negative entry counts
+        echo "$yellow""Entries being removed:""$reset"
+        test $dhcp_neg_count -gt 0 && echo "- DHCP entries: $dhcp_neg_count"
+        test $firewall_neg_count -gt 0 && echo "- Firewall entries: $firewall_neg_count" 
+        test $network_neg_count -gt 0 && echo "- Network entries: $network_neg_count"
+        test $wireless_neg_count -gt 0 && echo "- Wireless entries: $wireless_neg_count"
+        echo "$yellow""--- END OF DETAILED UCI CHANGES ---""$reset"
+    else
+        # In regular mode, just show counts by configuration type
+        echo "$blue""Configuration changes detected:""$reset"
+        # Show negative entry counts properly
+        if test $dhcp_neg_count -gt 0
+            echo "- Removed DHCP entries: $dhcp_neg_count"
+        end
+        if test $firewall_neg_count -gt 0
+            echo "- Removed Firewall entries: $firewall_neg_count"
+        end
+        if test $network_neg_count -gt 0
+            echo "- Removed Network entries: $network_neg_count"
+        end
+        if test $wireless_neg_count -gt 0
+            echo "- Removed Wireless entries: $wireless_neg_count"
+        end
+        
+        # Show positive entry counts
+        for config in $modified_configs
+            set config_changes (uci changes $config | wc -l)
+            echo "- $config: $config_changes changes"
+        end
+    end
+    
+    echo "$green""Total: $total_changes changes across ""$reset"(count $modified_configs + (count $negative_entries))"$green"" configuration files.""$reset"
+    echo "$yellow""No changes were applied (dry run mode).""$reset"
+    exit 0
+end
+
 # If dry-run is enabled, show UCI changes instead of committing them
 if test "$DRY_RUN" = "true"
     echo "$purple""--- DRY RUN: Displaying detected UCI configuration changes ---""$reset"
@@ -303,19 +377,53 @@ if test "$DRY_RUN" = "true"
     set negative_entries (uci changes | grep "^-" | sort -u)
     if test (count $negative_entries) -gt 0
         echo "$yellow""Warning: Found entries with '-' prefix that may cause issues:""$reset"
-        for entry in $negative_entries
-            echo "  $entry"
+        # Only in debug mode do we show the full list
+        if test "$DEBUG" = "true"
+            for entry in $negative_entries
+                echo "  $entry"
+            end
+        else
+            # Group by category and just show counts
+            set dhcp_count (echo $negative_entries | grep -c "^-dhcp")
+            set firewall_count (echo $negative_entries | grep -c "^-firewall")
+            set network_count (echo $negative_entries | grep -c "^-network")
+            set wireless_count (echo $negative_entries | grep -c "^-wireless")
+            
+            echo "$blue""Configuration entries being replaced:""$reset"
+            test $dhcp_count -gt 0 && echo "  - DHCP: $dhcp_count entries"
+            test $firewall_count -gt 0 && echo "  - Firewall: $firewall_count entries"
+            test $network_count -gt 0 && echo "  - Network: $network_count entries"
+            test $wireless_count -gt 0 && echo "  - Wireless: $wireless_count entries"
+            echo "$blue""These are normal during reconfiguration.""$reset"
         end
     end
     
-    # Display changes by configuration sections
+    # Display changes by configuration sections with privacy filtering
     set modified_configs (uci changes | grep -v "^-" | cut -d. -f1 | sort -u)
     if test (count $modified_configs) -eq 0
         echo "$yellow""No UCI changes detected.""$reset"
     else
-        for cfg in $modified_configs
-            echo "$yellow""Changes in: $cfg""$reset"
-            uci changes $cfg | tee -a "$LOG_FILE"
+        # Only show detailed changes in debug mode
+        if test "$DEBUG" = "true"
+            for cfg in $modified_configs
+                echo "$yellow""Changes in: $cfg""$reset"
+                uci changes $cfg | tee -a "$LOG_FILE"
+            end
+        else
+            # In non-debug mode, summarize by category and hide sensitive information
+            echo "$yellow""Configuration changes summary:""$reset"
+            for cfg in $modified_configs
+                set changes_count (uci changes $cfg | wc -l)
+                echo "$blue""- $cfg: $changes_count changes""$reset"
+                
+                # For security-sensitive configs, show special messages
+                if test "$cfg" = "network"; and uci changes $cfg | grep -q wireguard
+                    echo "$yellow""  Note: WireGuard settings included (keys masked in non-debug mode)""$reset"
+                end
+                if test "$cfg" = "wireless"
+                    echo "$yellow""  Note: Wireless settings included (passphrases masked in non-debug mode)""$reset"
+                end
+            end
         end
     end
     echo "$purple""--- END OF UCI CHANGES ---""$reset"

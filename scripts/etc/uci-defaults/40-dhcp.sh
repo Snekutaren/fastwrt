@@ -137,9 +137,10 @@ end
 # Process maclist.csv for static DHCP leases
 set MACLIST_PATH "$BASE_DIR/maclist.csv"
 if test -f "$MACLIST_PATH"
-  echo "$purple""Processing maclist.csv for static DHCP leases...""$reset"
+  echo "$blue""Processing maclist.csv for static DHCP leases...""$reset"
   set line_count 0
   set error_count 0
+  set success_count 0
   
   # Using fish's builtin line reading capabilities
   while read -l line
@@ -157,65 +158,58 @@ if test -f "$MACLIST_PATH"
       
       # Validate that we have all required fields
       if test (count $fields) -lt 4
-        echo "$red""Warning: Invalid line format in maclist.csv on line $line_count: $line""$reset"
-        echo "$yellow""Expected format: MAC,IP,NAME,NETWORK""$reset"
         set error_count (math $error_count + 1)
+        if test "$DEBUG" = "true"
+          echo "$red""Warning: Invalid line format in maclist.csv on line $line_count: $line""$reset"
+          echo "$yellow""Expected format: MAC,IP,NAME,NETWORK""$reset"
+        end
         continue
       end
       
-      # Extract fields and validate
+      # Extract fields and trim whitespace
       set mac_addr (string trim "$fields[1]")
       set ip_addr (string trim "$fields[2]")
       set device_name (string trim "$fields[3]")
       set network_name (string trim "$fields[4]")
       
-      # Validate MAC address format
-      if not string match -r '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$' "$mac_addr" > /dev/null
-        echo "$red""Warning: Invalid MAC address format in maclist.csv line $line_count: $mac_addr""$reset"
+      # Validate MAC address format - only show detailed errors in debug mode
+      if not string match -q -r '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$' "$mac_addr"
         set error_count (math $error_count + 1)
+        if test "$DEBUG" = "true"
+          echo "$red""Warning: Invalid MAC address format in maclist.csv line $line_count: $mac_addr""$reset"
+        end
         continue
       end
       
-      # Validate IP address format (basic check)
-      if not string match -r '^([0-9]{1,3}\.){3}[0-9]{1,3}$' "$ip_addr" > /dev/null
-        echo "$red""Warning: Invalid IP address format in maclist.csv line $line_count: $ip_addr""$reset"
-        set error_count (math $error_count + 1)
-        continue
+      # Convert device name to a safe UCI section name (replace hyphens and spaces with underscores)
+      set device_section (string replace -a "-" "_" "$device_name" | string replace -a " " "_")
+      
+      # Only show individual lease setups in debug mode
+      if test "$DEBUG" = "true"
+        echo "$blue""Setting up static lease for $device_name ($mac_addr -> $ip_addr)""$reset"
       end
       
-      # Skip if any required fields are empty
-      if test -z "$mac_addr"; or test -z "$ip_addr"; or test -z "$device_name"
-        echo "$red""Warning: Missing required field in maclist.csv line $line_count: $line""$reset"
-        set error_count (math $error_count + 1)
-        continue
-      end
+      # Add static lease with proper UCI syntax - ensuring proper quoting and handling
+      uci set "dhcp.$device_section=host"
+      uci set "dhcp.$device_section.name=$device_name"
+      uci set "dhcp.$device_section.mac=$mac_addr"
+      uci set "dhcp.$device_section.ip=$ip_addr"
+      uci set "dhcp.$device_section.interface=$network_name"
       
-      # Convert device name to a valid UCI section name (replace hyphens with underscores)
-      set device_section (string replace -a "-" "_" "$device_name")
-      
-      echo "$blue""Setting up static lease for $device_name ($mac_addr -> $ip_addr)""$reset"
-      
-      # Add static lease with proper UCI syntax (no spaces before equals)
-      uci set dhcp.$device_section='host'
-      uci set dhcp.$device_section.name="$device_name"
-      uci set dhcp.$device_section.mac="$mac_addr"
-      uci set dhcp.$device_section.ip="$ip_addr"
-      
-      # Use network_name if provided, otherwise default to "core"
-      if test -z "$network_name"
-        set network_name "core"
-      end
-      uci set dhcp.$device_section.interface="$network_name"
+      set success_count (math $success_count + 1)
     end
   end < "$MACLIST_PATH"
   
-  if test $error_count -eq 0
-    echo "$green""Static lease configuration completed successfully.""$reset"
-  else
-    echo "$yellow""Static lease configuration completed with $error_count errors.""$reset"
+  # Summary output
+  echo "$green""Configured $success_count static DHCP leases from maclist.csv""$reset"
+  if test $error_count -gt 0
+    echo "$yellow""Encountered $error_count errors while processing MAC list""$reset"
+    if test "$DEBUG" != "true"
+      echo "$yellow""Run with --debug for detailed error information""$reset"
+    end
   end
 else
-  echo "$red""Warning: maclist.csv not found at $MACLIST_PATH, skipping static lease configuration.""$reset"
+  echo "$yellow""Maclist file not found at: $MACLIST_PATH, skipping static lease configuration.""$reset"
 end
 
 # Note: UCI commits are handled in 98-commit.sh

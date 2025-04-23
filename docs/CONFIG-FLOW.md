@@ -37,22 +37,27 @@ The FastWrt configuration process follows a structured flow to ensure that compo
    - Establishes access policies
    - Sets up port forwarding and NAT
 
-7. **Wireless Setup (`60-wireless.sh`)**
+7. **WireGuard VPN (`55-wireguard.sh`)**
+   - Configures secure VPN access
+   - Generates keys and sets up interfaces
+   - Establishes secure remote access channels
+
+8. **Wireless Setup (`60-wireless.sh`)**
    - Configures radios and wireless interfaces
    - Sets up SSIDs and security
    - Links wireless networks to VLANs
 
-8. **SSH Configuration (`70-dropbear.sh`)**
+9. **SSH Configuration (`70-dropbear.sh`)**
    - Configures secure SSH access
    - Sets up key-based authentication
    - Restricts SSH access to secure networks
 
-9. **Verification (`98-commit.sh`)**
-   - Summarizes pending changes
-   - Validates configuration for potential issues
-   - Creates logs for troubleshooting
+10. **Verification (`80-summary.sh`)**
+    - Summarizes pending changes
+    - Validates configuration for potential issues
+    - Creates logs for troubleshooting
 
-10. **Final Setup (`99-first-boot.sh`)**
+11. **Final Setup (`99-first-boot.sh`)**
     - Sets up initial access credentials
     - Creates welcome banner
     - Performs any first-boot only tasks
