@@ -1,5 +1,6 @@
 #!/usr/bin/fish
-# FastWrt wireless configuration script - Fish shell implementation
+# FastWrt wireless configuration script - Implementation using fish shell
+# Fish shell is the default shell in FastWrt and should be used for all scripts
 
 # Set colors for better readability
 set green (echo -e "\033[0;32m")

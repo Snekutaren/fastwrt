@@ -1,5 +1,6 @@
 #!/usr/bin/fish
-# FastWrt network configuration - Pure fish implementation
+# FastWrt network configuration - Implementation using fish shell
+# Fish shell is the default shell in FastWrt and should be used for all scripts
 
 # Set colors for better readability
 set green (echo -e "\033[0;32m")
@@ -192,7 +193,7 @@ uci set network.wan.device='br-wan'
 # WireGuard interface (if needed)
 echo "$blue""Configuring WireGuard interface...""$reset"
 uci set network.wireguard='interface'
-uci set network.wireguard.proto='static'
+uci set network.wireguard.proto='wireguard'
 uci set network.wireguard.ipaddr="$WIREGUARD_IP"
 uci set network.wireguard.netmask='255.255.255.0'
 

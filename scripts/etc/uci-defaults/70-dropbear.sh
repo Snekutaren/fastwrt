@@ -1,5 +1,6 @@
 #!/usr/bin/fish
-# FastWrt Dropbear (SSH) configuration - Pure fish implementation
+# FastWrt Dropbear (SSH) configuration - Implementation using fish shell
+# Fish shell is the default shell in FastWrt and should be used for all scripts
 
 # Set colors for better readability
 set green (echo -e "\033[0;32m")
@@ -49,13 +50,14 @@ if test -d "$ssh_keys_dir"
                 chmod 600 /etc/dropbear/authorized_keys
             end
             
-            # Add the key without overwriting
-            echo "$blue""Adding key from $key_file to authorized_keys...""$reset"
-            if grep -q (cat "$key_file") "/etc/dropbear/authorized_keys"
-                echo "$yellow""Key already exists in authorized_keys, skipping.""$reset"
-            else
-                cat "$key_file" >> /etc/dropbear/authorized_keys
+            # Add the key without duplication - check if it exists first
+            set key_content (cat "$key_file")
+            if not grep -qFx "$key_content" "/etc/dropbear/authorized_keys"
+                echo "$blue""Adding key from $key_file to authorized_keys...""$reset"
+                echo "$key_content" >> /etc/dropbear/authorized_keys
                 echo "$green""Added key from $key_file to authorized_keys""$reset"
+            else
+                echo "$yellow""Key from $key_file already exists in authorized_keys, skipping.""$reset"
             end
         end
     end

@@ -1,5 +1,6 @@
 #!/usr/bin/fish
-# FastWrt Installation Script
+# FastWrt Installation Script - Implementation using fish shell
+# Fish shell is the default shell in FastWrt and should be used for all scripts
 
 # Set colors for better readability
 set green (echo -e "\033[0;32m")
@@ -99,8 +100,9 @@ begin
     echo 'set -gx CORE_POLICY_OUT "ACCEPT"'
     echo 'set -gx CORE_POLICY_FORWARD "REJECT"'
     echo 'set -gx OTHER_ZONES_POLICY_IN "DROP"'
-    echo 'set -gx OTHER_ZONES_POLICY_OUT "ACCEPT"'
-    echo 'set -gx OTHER_ZONES_POLICY_FORWARD "DROP"'
+    echo 'set -gx OTHER_ZONES_POLICY_OUT "ACCEPT"'  # Keep as ACCEPT
+    echo 'set -gx IOT_META_POLICY_OUT "DROP"'       # New policy for IoT and Meta
+    echo 'set -gx OTHER_ZONES_POLICY_FORWARD "REJECT"'
     echo 'set -gx WAN_POLICY_IN "DROP"'
     echo 'set -gx WAN_POLICY_OUT "ACCEPT"'
     echo 'set -gx WAN_POLICY_FORWARD "DROP"'

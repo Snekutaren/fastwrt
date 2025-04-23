@@ -1,5 +1,6 @@
 #!/usr/bin/fish
-# FastWrt firewall configuration script - Pure fish implementation
+# FastWrt firewall configuration script - Implementation using fish shell
+# Fish shell is the default shell in FastWrt and should be used for all scripts
 
 # Set colors for better readability
 set green (echo -e "\033[0;32m")
@@ -179,7 +180,7 @@ uci set firewall.nexus='zone'
 uci set firewall.nexus.name='nexus'
 uci set firewall.nexus.network='nexus'
 uci set firewall.nexus.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.nexus.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.nexus.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
 uci set firewall.nexus.forward="$OTHER_ZONES_POLICY_FORWARD"
 
 # Nodes Zone
@@ -188,7 +189,7 @@ uci set firewall.nodes='zone'
 uci set firewall.nodes.name='nodes'
 uci set firewall.nodes.network='nodes'
 uci set firewall.nodes.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.nodes.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.nodes.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
 uci set firewall.nodes.forward="$OTHER_ZONES_POLICY_FORWARD"
 
 # Meta Zone
@@ -197,7 +198,7 @@ uci set firewall.meta='zone'
 uci set firewall.meta.name='meta'
 uci set firewall.meta.network='meta'
 uci set firewall.meta.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.meta.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.meta.output="$IOT_META_POLICY_OUT"  # DROP - restricted internet access
 uci set firewall.meta.forward="$OTHER_ZONES_POLICY_FORWARD"
 
 # IoT Zone
@@ -206,7 +207,7 @@ uci set firewall.iot='zone'
 uci set firewall.iot.name='iot'
 uci set firewall.iot.network='iot'
 uci set firewall.iot.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.iot.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.iot.output="$IOT_META_POLICY_OUT"  # DROP - restricted internet access
 uci set firewall.iot.forward="$OTHER_ZONES_POLICY_FORWARD"
 
 # Guest Zone
@@ -215,7 +216,7 @@ uci set firewall.guest='zone'
 uci set firewall.guest.name='guest'
 uci set firewall.guest.network='guest'
 uci set firewall.guest.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.guest.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.guest.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
 uci set firewall.guest.forward="$OTHER_ZONES_POLICY_FORWARD"
 
 # WireGuard Zone
@@ -224,7 +225,7 @@ uci set firewall.wireguard='zone'
 uci set firewall.wireguard.name='wireguard'
 uci set firewall.wireguard.network='wireguard'
 uci set firewall.wireguard.input="$OTHER_ZONES_POLICY_IN"
-uci set firewall.wireguard.output="$OTHER_ZONES_POLICY_OUT"
+uci set firewall.wireguard.output="$OTHER_ZONES_POLICY_OUT"  # ACCEPT - internet access allowed
 uci set firewall.wireguard.forward="$OTHER_ZONES_POLICY_FORWARD"
 
 # WAN Zone
@@ -236,6 +237,26 @@ uci set firewall.wan_zone.input="$WAN_POLICY_IN"
 uci set firewall.wan_zone.output="$WAN_POLICY_OUT"
 uci set firewall.wan_zone.forward="$WAN_POLICY_FORWARD"
 uci set firewall.wan_zone.masq='1'  # Keep NAT enabled
+
+# Add strict enforcement rules for WAN input and forward policies
+echo "$blue""Adding strict enforcement rule for WAN input policy...""$reset"
+uci set firewall.enforce_wan_input='rule'
+uci set firewall.enforce_wan_input.name='Enforce-WAN-Input-Policy'
+uci set firewall.enforce_wan_input.src='wan'
+uci set firewall.enforce_wan_input.proto='all'
+uci set firewall.enforce_wan_input.target='DROP'
+uci set firewall.enforce_wan_input.priority='1'  # Highest priority (lower number)
+uci set firewall.enforce_wan_input.enabled='1'
+
+echo "$blue""Adding strict enforcement rule for WAN forwarding policy...""$reset"
+uci set firewall.enforce_wan_forward='rule'
+uci set firewall.enforce_wan_forward.name='Enforce-WAN-Forward-Policy'
+uci set firewall.enforce_wan_forward.src='wan'
+uci set firewall.enforce_wan_forward.dest='*'
+uci set firewall.enforce_wan_forward.proto='all'
+uci set firewall.enforce_wan_forward.target='DROP'
+uci set firewall.enforce_wan_forward.priority='1'  # Highest priority (lower number)
+uci set firewall.enforce_wan_forward.enabled='1'
 
 ##################################
 # SECTION 2.1: SSH ACCESS RULES
@@ -265,7 +286,7 @@ uci set firewall.ssh_block_wan.name='SSH-block-wan'
 uci set firewall.ssh_block_wan.src='wan'
 uci set firewall.ssh_block_wan.proto='tcp'
 uci set firewall.ssh_block_wan.dest_port='6622'
-uci set firewall.ssh_block_wan.target='REJECT'
+uci set firewall.ssh_block_wan.target='DROP'  # Changed from REJECT to DROP
 uci set firewall.ssh_block_wan.enabled='1'
 
 # SSH rate limiting rule
@@ -290,6 +311,17 @@ uci set firewall.ssh_protect.connbytes='60'
 uci set firewall.ssh_protect.connbytes_mode='connbytes'
 uci set firewall.ssh_protect.connbytes_dir='original'
 uci set firewall.ssh_protect.enabled='0'  # Disabled by default, enable in secure_ssh.sh
+
+# Add a high-priority rule to ensure core network always has access to LuCI web interface
+echo "$blue""Adding high-priority rule to ensure core network always has web UI access...""$reset"
+uci set firewall.luci_core_access='rule'
+uci set firewall.luci_core_access.name='LuCI-web-from-core'
+uci set firewall.luci_core_access.src='core'
+uci set firewall.luci_core_access.proto='tcp'
+uci set firewall.luci_core_access.dest_port='80'
+uci set firewall.luci_core_access.target='ACCEPT'
+uci set firewall.luci_core_access.priority='0'  # Highest possible priority (lower number = higher priority)
+uci set firewall.luci_core_access.enabled='1'
 
 #########################################
 # SECTION 2.2: DISABLED SPECIAL RULES
@@ -363,7 +395,7 @@ if test (count $missing_networks) -gt 0
     exit 1
 end  # Added missing 'end' statement here
 
-# Continue with forwarding rules
+# Continue with forwarding rules - Enable forwarding to WAN for core, nexus, nodes, guest
 # Core to WAN (Internet access for ClosedWrt network)
 echo "$green""Adding forwarding from Core to WAN...""$reset"
 uci set firewall.forward_core_to_wan='forwarding'
@@ -375,6 +407,44 @@ echo "$green""Adding forwarding from Guest to WAN for internet access...""$reset
 uci set firewall.forward_guest_to_wan='forwarding'
 uci set firewall.forward_guest_to_wan.src='guest'
 uci set firewall.forward_guest_to_wan.dest='wan'
+
+# Nexus to WAN (Internet access for Nexus network)
+echo "$green""Adding forwarding from Nexus to WAN for internet access...""$reset"
+uci set firewall.forward_nexus_to_wan='forwarding'
+uci set firewall.forward_nexus_to_wan.src='nexus'
+uci set firewall.forward_nexus_to_wan.dest='wan'
+
+# Nodes to WAN (Internet access for Nodes network)
+echo "$green""Adding forwarding from Nodes to WAN for internet access...""$reset"
+uci set firewall.forward_nodes_to_wan='forwarding'
+uci set firewall.forward_nodes_to_wan.src='nodes'
+uci set firewall.forward_nodes_to_wan.dest='wan'
+
+# IoT to WAN (Internet access for IoT network)
+echo "$green""Adding forwarding from IoT to WAN for internet access (disabled by default)...""$reset"
+uci set firewall.forward_iot_to_wan='forwarding'
+uci set firewall.forward_iot_to_wan.src='iot'
+uci set firewall.forward_iot_to_wan.dest='wan'
+uci set firewall.forward_iot_to_wan.enabled='0'  # Disabled by default
+
+# Meta to WAN (Internet access for Meta network)
+echo "$green""Adding forwarding from Meta to WAN for internet access (disabled by default)...""$reset"
+uci set firewall.forward_meta_to_wan='forwarding'
+uci set firewall.forward_meta_to_wan.src='meta'
+uci set firewall.forward_meta_to_wan.dest='wan'
+uci set firewall.forward_meta_to_wan.enabled='0'  # Disabled by default
+
+# Core to Nexus forwarding (allow core network to access Nexus network)
+echo "$green""Adding forwarding from Core to Nexus...""$reset"
+uci set firewall.forward_core_to_nexus='forwarding'
+uci set firewall.forward_core_to_nexus.src='core'
+uci set firewall.forward_core_to_nexus.dest='nexus'
+
+# Core to Nodes forwarding (allow core network to access Nodes network)
+echo "$green""Adding forwarding from Core to Nodes...""$reset"
+uci set firewall.forward_core_to_nodes='forwarding'
+uci set firewall.forward_core_to_nodes.src='core'
+uci set firewall.forward_core_to_nodes.dest='nodes'
 
 # Allow all zones to get DHCP, even without internet access
 echo "$blue""Adding DHCP access rules for all other zones (without internet access)...""$reset"
@@ -501,7 +571,7 @@ uci set firewall.port_forward_wan_to_wg.src_dport='52018'
 uci set firewall.port_forward_wan_to_wg.dest='wireguard'
 uci set firewall.port_forward_wan_to_wg.dest_ip="$WIREGUARD_IP"
 uci set firewall.port_forward_wan_to_wg.proto='udp'
-uci set firewall.port_forward_wan_to_wg.enabled='0'
+uci set firewall.port_forward_wan_to_wg.enabled='1'  # Change from '0' to '1' to enable by default
 
 #############################
 # SECTION 7: FINALIZE
