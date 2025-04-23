@@ -1,66 +1,90 @@
 #!/usr/bin/fish
 # FastWrt Dropbear (SSH) configuration - Pure fish implementation
 
+# Set colors for better readability
+set green (echo -e "\033[0;32m")
+set yellow (echo -e "\033[0;33m")
+set red (echo -e "\033[0;31m")
+set blue (echo -e "\033[0;34m")
+set purple (echo -e "\033[0;35m")
+set reset (echo -e "\033[0m")
+
 # Ensure the script runs from its own directory
 cd $BASE_DIR
-echo "Current working directory: "(pwd)
+echo "$blue""Current working directory: ""$reset"(pwd)
 
 # Log the purpose of the script
-echo "Starting Dropbear configuration script to set up SSH access..."
+echo "$purple""Starting Dropbear configuration script to set up SSH access...""$reset"
 
 ### --- Dropbear (SSH) ---
-echo "Setting Dropbear interface to 'core'..."
+# DROPBEAR SPECIFIC RESPONSIBILITIES:
+# 1. Basic SSH configuration (port, interface)
+# 2. SSH settings in UCI
+
+echo "$blue""Setting Dropbear interface to 'core'...""$reset"
 uci set dropbear.@dropbear[0].Interface='core'
-echo "Setting Dropbear port to '6622'..."
+echo "$blue""Setting Dropbear port to '6622'...""$reset"
 uci set dropbear.@dropbear[0].Port='6622'
 
-# Check if authorized_keys file exists and contains valid keys
-if test -f "/etc/dropbear/authorized_keys"; and grep -q "ssh-" "/etc/dropbear/authorized_keys"
-    echo "SSH keys found. Setting Dropbear to use key-based authentication only..."
-    uci set dropbear.@dropbear[0].PasswordAuth='off'
-    uci set dropbear.@dropbear[0].RootPasswordAuth='off'
-else
-    echo "No SSH keys found. Temporarily enabling password authentication..."
-    echo "IMPORTANT: Password authentication will be disabled when running secure_ssh.sh"
-    uci set dropbear.@dropbear[0].PasswordAuth='on'
-    uci set dropbear.@dropbear[0].RootPasswordAuth='on'
-end
+# Don't duplicate first-boot responsibilities:
+# - Don't change PasswordAuth/RootPasswordAuth settings (done in first-boot)
+# - Don't handle key management (done in first-boot)
 
-# Try to add SSH keys from available sources
-echo "Checking for SSH keys to add..."
+# Try to add SSH keys but don't override first-boot configuration
+echo "$blue""Checking for SSH keys to add...""$reset"
 set ssh_keys_dir "$BASE_DIR/ssh_keys"
 
 if test -d "$ssh_keys_dir"
     # Check for public keys in the ssh_keys directory
     for key_file in $ssh_keys_dir/*.pub
         if test -f "$key_file"
-            echo "Found key file: $key_file"
-            # Call secure_ssh.sh to add the keys
-            source "$BASE_DIR/helpers/secure_ssh.sh"
-            break
+            echo "$green""Found key file: $key_file""$reset"
+            # Only create directory if it doesn't exist (avoid overriding first-boot)
+            mkdir -p /etc/dropbear
+            chmod 700 /etc/dropbear
+            
+            # Create authorized_keys if it doesn't exist
+            if not test -f "/etc/dropbear/authorized_keys"
+                touch /etc/dropbear/authorized_keys
+                chmod 600 /etc/dropbear/authorized_keys
+            end
+            
+            # Add the key without overwriting
+            echo "$blue""Adding key from $key_file to authorized_keys...""$reset"
+            if grep -q (cat "$key_file") "/etc/dropbear/authorized_keys"
+                echo "$yellow""Key already exists in authorized_keys, skipping.""$reset"
+            else
+                cat "$key_file" >> /etc/dropbear/authorized_keys
+                echo "$green""Added key from $key_file to authorized_keys""$reset"
+            end
         end
     end
 end
 
 # Restart dropbear to apply changes
-echo "Restarting Dropbear service to apply changes..."
-/etc/init.d/dropbear restart
+echo "$blue""Restarting Dropbear service to apply changes...""$reset"
+if test "$DRY_RUN" = "false"
+    /etc/init.d/dropbear restart
+    echo "$green""Dropbear restarted successfully""$reset"
+else
+    echo "$yellow""DRY RUN: Skipping Dropbear restart""$reset"
+end
 
 # Verify port is properly set
-echo "Verifying Dropbear configuration..."
+echo "$yellow""Verifying Dropbear configuration...""$reset"
 uci get dropbear.@dropbear[0].Port
 
 # Note: Firewall rules for SSH access are now configured in 50-firewall.sh
 
-# Note: UCI commits are handled in 98-commit.sh
-echo "SSH/Dropbear configuration completed successfully. Changes will be applied during final commit."
+# Note: UCI commits are handled in 01-install.sh
+echo "$green""SSH/Dropbear configuration completed successfully. Changes will be applied during final commit.""$reset"
 
-echo "
+echo "$yellow""
 SECURITY NOTICE:
 ---------------
 SSH access is configured for security:
 1. Access ONLY through internal networks and WireGuard VPN
 2. NO direct access from WAN
 3. For remote access, you must connect to WireGuard VPN first
-4. Run secure_ssh.sh to add SSH keys and enhance security further
-"
+4. First-boot script will finalize SSH security settings
+""$reset"

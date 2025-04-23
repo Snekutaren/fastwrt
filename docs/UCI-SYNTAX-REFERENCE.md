@@ -275,28 +275,35 @@ uci add_list dhcp.@dnsmasq[-1].server='1.1.1.1'
 
 ## UCI Best Practices
 
-### 1. Always Commit Changes
-Always commit changes after making modifications:
+### 1. Centralized Commits
+In the FastWrt architecture, UCI commits are handled centrally by the `01-install.sh` script:
 ```bash
-uci commit network
-uci commit firewall
-uci commit wireless
-# Or commit all at once
-uci commit
+# CORRECT - Let the main script handle commits
+# (Don't add a uci commit in individual configuration scripts)
+
+# INCORRECT - Adding commits in individual scripts
+uci commit network  # Don't do this in configuration scripts
 ```
 
-### 2. Use Backup Functions Before Changes
+### 2. Always Verify Changes
+Use the verification functionality to check pending changes:
+```bash
+# Show pending changes for network configuration
+uci changes network
+
+# Count total pending changes
+uci changes | wc -l
+```
+
+### 3. Use Backup Functions Before Changes
 Create backups before making major changes:
 ```bash
-cp /etc/config/network /etc/config/network.bak
-```
+# Use the centralized backup functionality
+source "$BASE_DIR/helpers/backup_function.sh"
+backup_config network
 
-### 3. Check for Errors Before Accessing
-Verify that sections exist before operating on them:
-```bash
-if uci -q get network.lan > /dev/null; then
-  uci set network.lan.ipaddr='192.168.1.1'
-fi
+# Or manually create backups
+cp /etc/config/network /etc/config/network.bak
 ```
 
 ### 4. Consistent Quoting Style
@@ -345,8 +352,29 @@ uci export network
 uci -q get network.lan.ipaddr || echo "Section or option not found"
 ```
 
+## Color Coding in FastWrt Scripts
+
+FastWrt uses color-coded output for better readability:
+
+```bash
+# Set colors for better readability
+set green (echo -e "\033[0;32m")   # Success messages
+set yellow (echo -e "\033[0;33m")  # Warnings and notices
+set red (echo -e "\033[0;31m")     # Errors
+set blue (echo -e "\033[0;34m")    # Information
+set purple (echo -e "\033[0;35m")  # Section headers
+set reset (echo -e "\033[0m")      # Reset color
+
+# Example usage
+echo "$blue""Configuring network...""$reset"
+echo "$green""Configuration complete.""$reset"
+echo "$red""Error: Failed to set option.""$reset"
+```
+
+When using colors, always reset the color after each message to prevent color bleeding into subsequent output.
+
 ---
 
 By following these guidelines consistently across all FastWrt scripts, you'll avoid syntax errors and ensure reliable configuration of OpenWrt devices.
 
-Last Updated: April 21, 2025
+Last Updated: April 24, 2025

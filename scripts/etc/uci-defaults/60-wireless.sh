@@ -1,40 +1,58 @@
 #!/usr/bin/fish
 # FastWrt wireless configuration script - Fish shell implementation
 
+# Set colors for better readability
+set green (echo -e "\033[0;32m")
+set yellow (echo -e "\033[0;33m")
+set red (echo -e "\033[0;31m")
+set blue (echo -e "\033[0;34m")
+set purple (echo -e "\033[0;35m")
+set reset (echo -e "\033[0m")
+
 # Ensure the script runs from its own directory
 cd $BASE_DIR
-echo "Current working directory: "(pwd)
+echo "$blue""Current working directory: ""$reset"(pwd)
 
 # Log the purpose of the script
-echo "Starting wireless configuration script..."
+echo "$purple""Starting wireless configuration script...""$reset"
 
 # Load passphrases from file
 if test -f "$BASE_DIR/passphrases.fish"
     source "$BASE_DIR/passphrases.fish"
+    echo "$green""Loaded passphrases from $BASE_DIR/passphrases.fish""$reset"
 else
-    echo "ERROR: Fish-compatible passphrases file not found!"
+    echo "$red""ERROR: Fish-compatible passphrases file not found!""$reset"
     exit 1
 end
 
 # Add debugging statements to log variable values
-echo "SSID_OPENWRT: $SSID_OPENWRT"
-echo "PASSPHRASE_OPENWRT: $PASSPHRASE_OPENWRT"
-echo "SSID_CLOSEDWRT: $SSID_CLOSEDWRT"
-echo "PASSPHRASE_CLOSEDWRT: $PASSPHRASE_CLOSEDWRT"
-echo "SSID_IOTWRT: $SSID_IOTWRT"
-echo "PASSPHRASE_IOTWRT: $PASSPHRASE_IOTWRT"
-echo "SSID_METAWRT: $SSID_METAWRT"
-echo "PASSPHRASE_METAWRT: $PASSPHRASE_METAWRT"
+if test "$DEBUG" = "true"
+    echo "$yellow""SSID_OPENWRT: $SSID_OPENWRT""$reset"
+    echo "$yellow""PASSPHRASE_OPENWRT: $PASSPHRASE_OPENWRT""$reset"
+    echo "$yellow""SSID_CLOSEDWRT: $SSID_CLOSEDWRT""$reset"
+    echo "$yellow""PASSPHRASE_CLOSEDWRT: $PASSPHRASE_CLOSEDWRT""$reset"
+    echo "$yellow""SSID_IOTWRT: $SSID_IOTWRT""$reset"
+    echo "$yellow""PASSPHRASE_IOTWRT: $PASSPHRASE_IOTWRT""$reset"
+    echo "$yellow""SSID_METAWRT: $SSID_METAWRT""$reset"
+    echo "$yellow""PASSPHRASE_METAWRT: $PASSPHRASE_METAWRT""$reset"
+else
+    # Just show SSIDs in normal mode, without passphrases
+    echo "$blue""Configuring wireless networks with SSIDs:""$reset"
+    echo "$blue""- $SSID_OPENWRT""$reset"
+    echo "$blue""- $SSID_CLOSEDWRT""$reset"
+    echo "$blue""- $SSID_IOTWRT""$reset"
+    echo "$blue""- $SSID_METAWRT""$reset"
+end
 
 # Clear existing wireless interfaces
-echo "Clearing existing wireless configuration..."
+echo "$blue""Clearing existing wireless configuration...""$reset"
 while uci -q delete wireless.@wifi-iface[0] > /dev/null 2>&1
-    echo "Deleted wireless.@wifi-iface[0]."
+    echo "$yellow""Deleted wireless.@wifi-iface[0].""$reset"
 end
-echo "All wifi-iface entries cleared."
+echo "$green""All wifi-iface entries cleared.""$reset"
 
 # Configure 2.4GHz radio
-echo "Configuring 2.4GHz radio (radio0)..."
+echo "$blue""Configuring 2.4GHz radio (radio0)...""$reset"
 uci set wireless.radio0='wifi-device'
 uci set wireless.radio0.channel='1'
 uci set wireless.radio0.band='2g'
@@ -44,9 +62,10 @@ uci set wireless.radio0.country='SE'  # Adjust country code as needed
 # Fix for Indoor Only Channel issue - explicitly set indoor/outdoor mode
 uci set wireless.radio0.indoor='1'  # Set to 1 for indoor use, 0 for outdoor
 uci set wireless.radio0.cell_density='0'  # 0=default density
+echo "$green""2.4GHz radio configured.""$reset"
 
 # Configure 5GHz radio
-echo "Configuring 5GHz radio (radio1)..."
+echo "$blue""Configuring 5GHz radio (radio1)...""$reset"
 uci set wireless.radio1='wifi-device'
 uci set wireless.radio1.channel='36'  # Using a commonly allowed indoor channel
 uci set wireless.radio1.band='5g'
@@ -56,43 +75,32 @@ uci set wireless.radio1.country='SE'  # Adjust country code as needed
 # Fix for Indoor Only Channel issue - explicitly set indoor/outdoor mode
 uci set wireless.radio1.indoor='1'  # Set to 1 for indoor use, 0 for outdoor
 uci set wireless.radio1.cell_density='0'  # 0=default density
+echo "$green""5GHz radio configured.""$reset"
 
 # Verify that all networks exist before configuring wireless interfaces
-echo "Verifying all required networks exist..."
+echo "$blue""Verifying all required networks exist...""$reset"
 set required_networks core guest iot meta
 
+# Check for missing networks
+set missing_networks
 for net in $required_networks
     if not uci -q get "network.$net" > /dev/null
-        echo "ERROR: Network '$net' does not exist. Creating it as a fallback..."
-        # Create a fallback network if it doesn't exist
-        uci set "network.$net"='interface'
-        uci set "network.$net.proto"='static'
-        uci set "network.$net.device"='br-lan'
-        
-        # Set a default IP based on the network
-        switch $net
-            case core
-                uci set "network.$net.ipaddr"='10.0.0.1'
-            case guest
-                uci set "network.$net.ipaddr"='192.168.90.1'
-            case iot
-                uci set "network.$net.ipaddr"='10.0.80.1'
-            case meta
-                uci set "network.$net.ipaddr"='10.0.70.1'
-            case '*'
-                uci set "network.$net.ipaddr"='192.168.100.1'
-        end
-        
-        uci set "network.$net.netmask"='255.255.255.0'
-        echo "Created fallback network: $net"
-    else
-        echo "Network '$net' exists, proceeding."
+        set -a missing_networks $net
     end
+end
+
+if test (count $missing_networks) -gt 0
+    echo "$red""ERROR: The following required networks are missing: ""$reset"(string join ", " $missing_networks)
+    echo "$red""Network interfaces must be properly configured in 30-network.sh before wireless configuration.""$reset"
+    echo "$red""Aborting wireless configuration to prevent inconsistent state.""$reset"
+    exit 1
+else
+    echo "$green""All required networks exist, proceeding with wireless configuration.""$reset"
 end
 
 # Configure interfaces for each SSID
 # Assign IoT to 2G radio
-echo "Creating IOT network on 2.4GHz..."
+echo "$blue""Creating IOT network on 2.4GHz...""$reset"
 uci set wireless.wifinet0='wifi-iface'
 uci set wireless.wifinet0.device='radio0'
 uci set wireless.wifinet0.mode='ap'
@@ -100,12 +108,13 @@ uci set wireless.wifinet0.ssid="$SSID_IOTWRT"
 uci set wireless.wifinet0.key="$PASSPHRASE_IOTWRT"
 uci set wireless.wifinet0.encryption='psk2'
 uci set wireless.wifinet0.network='iot'  # Connect to IOT network
+
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet0.macfilter='disable'
-echo "IoT assigned"
+echo "$green""IoT network assigned""$reset"
 
 # Assign OpenWrt to guest network on both radios
-echo "Configuring OpenWrt SSID on both radios..."
+echo "$blue""Configuring OpenWrt SSID on both radios...""$reset"
 uci set wireless.wifinet1='wifi-iface'
 uci set wireless.wifinet1.device='radio0'
 uci set wireless.wifinet1.mode='ap'
@@ -125,10 +134,10 @@ uci set wireless.wifinet2.encryption='psk2'
 uci set wireless.wifinet2.network='guest'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet2.macfilter='disable'
-echo "OpenWrt assigned"
+echo "$green""OpenWrt assigned""$reset"
 
 # Assign ClosedWrt to core network on both radios
-echo "Configuring ClosedWrt SSID on both radios..."
+echo "$blue""Configuring ClosedWrt SSID on both radios...""$reset"
 uci set wireless.wifinet3='wifi-iface'
 uci set wireless.wifinet3.device='radio0'
 uci set wireless.wifinet3.mode='ap'
@@ -148,10 +157,10 @@ uci set wireless.wifinet4.encryption='psk2'
 uci set wireless.wifinet4.network='core'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet4.macfilter='disable'
-echo "ClosedWrt assigned"
+echo "$green""ClosedWrt assigned""$reset"
 
 # Assign MetaWrt to 5G radio only
-echo "Configuring MetaWrt SSID on 5G radio..."
+echo "$blue""Configuring MetaWrt SSID on 5G radio...""$reset"
 uci set wireless.wifinet5='wifi-iface'
 uci set wireless.wifinet5.device='radio1'
 uci set wireless.wifinet5.mode='ap'
@@ -161,26 +170,28 @@ uci set wireless.wifinet5.encryption='psk2'
 uci set wireless.wifinet5.network='meta'
 # Initialize macfilter to 'disable' by default - devices can connect initially
 uci set wireless.wifinet5.macfilter='disable'
-echo "MetaWrt assigned"
+echo "$green""MetaWrt assigned""$reset"
 
 # Enable 2G radio
-echo "[INFO] Enabling 2G radio..."
+echo "$blue""[INFO] Enabling 2G radio...""$reset"
 uci set wireless.radio0.disabled='0'
-echo "[SUCCESS] 2G radio enabled successfully."
+echo "$green""[SUCCESS] 2G radio enabled successfully.""$reset"
 
 # Enable 5G radio
-echo "[INFO] Enabling 5G radio..."
+echo "$blue""[INFO] Enabling 5G radio...""$reset"
 uci set wireless.radio1.disabled='0'
-echo "[SUCCESS] 5G radio enabled successfully."
+echo "$green""[SUCCESS] 5G radio enabled successfully.""$reset"
 
 # Process the maclist file line by line
 set MACLIST_PATH "$BASE_DIR/maclist.csv"
 if test -f "$MACLIST_PATH"
-  echo "Maclist file found at: $MACLIST_PATH"
+  echo "$green""Maclist file found at: $MACLIST_PATH""$reset"
   
   # First, collect all core/ClosedWrt MAC addresses
   set core_macs
+  set mac_processing_errors 0
   
+  echo "$blue""First pass: identifying core devices...""$reset"
   while read -l line
     # Skip comment lines and empty lines
     if string match -q "#*" $line; or test -z (string trim "$line")
@@ -192,6 +203,8 @@ if test -f "$MACLIST_PATH"
     
     # Skip lines with invalid format
     if test (count $fields) -lt 4
+      echo "$yellow""Warning: Skipping line with invalid format: $line""$reset"
+      set mac_processing_errors (math $mac_processing_errors + 1)
       continue
     end
     
@@ -210,10 +223,11 @@ if test -f "$MACLIST_PATH"
     # Add to core_macs array if this is a core/ClosedWrt device
     if test "$network_name_lower" = "core" -o "$network_name_lower" = "closedwrt"
       set -a core_macs $mac_addr
-      echo "Added $mac_addr to core devices list (from $network_name)"
+      echo "$blue""Added $mac_addr to core devices list (from $network_name)""$reset"
     end
   end < "$MACLIST_PATH"
   
+  echo "$blue""Second pass: assigning MACs to networks...""$reset"
   # Now process the maclist again and assign MACs to networks
   while read -l line
     # Skip comment lines and empty lines
@@ -234,11 +248,11 @@ if test -f "$MACLIST_PATH"
     set device_name (string trim "$fields[3]")
     set network_name (string trim "$fields[4]")
     
-    echo "Processing MAC entry: MAC=$mac_addr, IP=$ip_addr, Name=$device_name, Network=$network_name"
+    echo "$blue""Processing MAC entry: MAC=$mac_addr, IP=$ip_addr, Name=$device_name, Network=$network_name""$reset"
     
     # Skip non-wifi devices (those with names ending in -eth)
     if string match -q "*-eth" "$device_name"
-      echo "Skipping Ethernet device: $device_name ($mac_addr)"
+      echo "$yellow""Skipping Ethernet device: $device_name ($mac_addr)""$reset"
       continue
     end
     
@@ -257,7 +271,7 @@ if test -f "$MACLIST_PATH"
         set network_name "meta"
     end
     
-    echo "Adding MAC $mac_addr to $network_name network"
+    echo "$blue""Adding MAC $mac_addr to $network_name network""$reset"
     
     # Add MAC to the appropriate maclist for its primary network
     switch "$network_name"
@@ -276,14 +290,14 @@ if test -f "$MACLIST_PATH"
         uci add_list wireless.wifinet0.maclist="$mac_addr"
         
       case '*'
-        echo "Skipping MAC $mac_addr - no valid network specified ($network_name)"
+        echo "$yellow""Skipping MAC $mac_addr - no valid network specified ($network_name)""$reset"
     end
   end < "$MACLIST_PATH"
   
   # Now add all core/ClosedWrt MACs to all other networks as well
-  echo "Adding ClosedWrt devices to all networks' MAC allow lists..."
+  echo "$blue""Adding ClosedWrt devices to all networks' MAC allow lists...""$reset"
   for mac in $core_macs
-    echo "Adding core device MAC $mac to all networks"
+    echo "$blue""Adding core device MAC $mac to all networks""$reset"
     # Add to guest network (OpenWrt)
     uci add_list wireless.wifinet1.maclist="$mac"
     uci add_list wireless.wifinet2.maclist="$mac"
@@ -293,32 +307,45 @@ if test -f "$MACLIST_PATH"
     uci add_list wireless.wifinet5.maclist="$mac"
   end
   
+  if test $mac_processing_errors -gt 0
+    echo "$yellow""Completed MAC processing with $mac_processing_errors warnings""$reset"
+  else
+    echo "$green""MAC processing completed successfully""$reset"
+  end
 else
-  echo "Maclist file not found at: $MACLIST_PATH"
+  echo "$red""Maclist file not found at: $MACLIST_PATH""$reset"
 end
 
 # Directly enable MAC filtering if the flag is set to true
 if test "$ENABLE_MAC_FILTERING" = true
-  echo "MAC filtering enabled by configuration, activating it now..."
+  echo "$yellow""MAC filtering enabled by configuration, activating it now...""$reset"
   uci set wireless.wifinet0.macfilter='allow'
   uci set wireless.wifinet1.macfilter='allow'
   uci set wireless.wifinet2.macfilter='allow'
   uci set wireless.wifinet3.macfilter='allow'
   uci set wireless.wifinet4.macfilter='allow'
   uci set wireless.wifinet5.macfilter='allow'
-  echo "MAC filtering has been enabled. Only devices in the maclist will be allowed to connect."
+  echo "$green""MAC filtering has been enabled. Only devices in the maclist will be allowed to connect.""$reset"
 else
-  echo "MAC filtering is disabled by configuration."
-  echo "To enable it later, run enable_mac_filtering.sh script."
+  echo "$yellow""MAC filtering is disabled by configuration.""$reset"
+  echo "$yellow""To enable it later, run enable_mac_filtering.sh script.""$reset"
 end
 
 # Create enable_mac_filtering script for later activation
-echo "Creating utility script to enable MAC filtering when ready..."
+echo "$blue""Creating utility script to enable MAC filtering when ready...""$reset"
 echo '#!/usr/bin/fish
-echo "Starting MAC filtering activation script..."
+# MAC filtering activation script
+
+# Set colors for readability
+set green (echo -e "\033[0;32m")
+set yellow (echo -e "\033[0;33m")
+set blue (echo -e "\033[0;34m")
+set reset (echo -e "\033[0m")
+
+echo "$blue""Starting MAC filtering activation script...""$reset"
 
 # Configure wireless interfaces to use the MAC filtering
-echo "Setting MAC filters to allow mode..."
+echo "$yellow""Setting MAC filters to allow mode...""$reset"
 uci set wireless.wifinet0.macfilter="allow"
 uci set wireless.wifinet1.macfilter="allow"
 uci set wireless.wifinet2.macfilter="allow"
@@ -330,15 +357,17 @@ uci set wireless.wifinet5.macfilter="allow"
 uci commit wireless
 wifi reload
 
-echo "MAC filtering has been enabled. Only devices in the maclist.csv will now be allowed to connect."
+echo "$green""MAC filtering has been enabled. Only devices in the maclist.csv will now be allowed to connect.""$reset"
 ' > "$BASE_DIR/enable_mac_filtering.sh"
 
 chmod +x "$BASE_DIR/enable_mac_filtering.sh"
-echo "Created utility script $BASE_DIR/enable_mac_filtering.sh to enable MAC filtering when ready."
+echo "$green""Created utility script $BASE_DIR/enable_mac_filtering.sh to enable MAC filtering when ready.""$reset"
 
-# Early commit to ensure we don't lose passphrase changes
 # Note: UCI commits are handled in 98-commit.sh instead
-echo "Wireless configuration changes complete. Changes will be applied during final commit."
+echo "$green""Wireless configuration changes complete. Changes will be applied during final commit.""$reset"
 
-echo "Wireless configuration script completed successfully."
-echo "NOTE: MAC filtering is currently DISABLED. Run enable_mac_filtering.sh when you're ready to activate it."
+echo "$green""Wireless configuration script completed successfully.""$reset"
+echo "$yellow""NOTE: MAC filtering is currently ""$reset"(test "$ENABLE_MAC_FILTERING" = true && echo "ENABLED" || echo "DISABLED")"$yellow"". ""$reset"
+if test "$ENABLE_MAC_FILTERING" != true
+  echo "$yellow""Run enable_mac_filtering.sh when you're ready to activate it.""$reset"
+end
