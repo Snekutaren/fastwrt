@@ -2,13 +2,8 @@
 # FastWrt DHCP configuration - Implementation using fish shell
 # Fish shell is the default shell in FastWrt and should be used for all scripts
 
-# Set colors for better readability
-set green (echo -e "\033[0;32m")
-set yellow (echo -e "\033[0;33m")
-set red (echo -e "\033[0;31m")
-set blue (echo -e "\033[0;34m")
-set purple (echo -e "\033[0;35m")
-set reset (echo -e "\033[0m")
+# Source common color definitions
+source "$PROFILE_DIR/colors.fish"
 
 # Ensure the script runs from its own directory
 cd $BASE_DIR
@@ -59,16 +54,11 @@ uci set dhcp.@dnsmasq[-1].authoritative='1'
 uci set dhcp.@dnsmasq[-1].readethers='1'
 uci set dhcp.@dnsmasq[-1].leasefile='/tmp/dhcp.leases'
 uci set dhcp.@dnsmasq[-1].resolvfile='/tmp/resolv.conf.d/resolv.conf.auto'
-uci set dhcp.@dnsmasq[-1].nonwildcard='1'
-uci set dhcp.@dnsmasq[-1].localservice='1'
-uci set dhcp.@dnsmasq[-1].ednspacket_max='1232'
-uci set dhcp.@dnsmasq[-1].filter_aaaa='0'
-uci set dhcp.@dnsmasq[-1].filter_a='0'
 
-# Force clients to use router DNS
-echo "$blue""Configuring DNS enforcement...""$reset"
-uci set dhcp.@dnsmasq[-1].localservice='0'  # Allow requests from all networks, not just local
-uci set dhcp.@dnsmasq[-1].noresolv='1'  # Don't read /etc/resolv.conf
+# FIX DNS ISSUES:
+# Allow using system resolver while still using configured servers
+uci set dhcp.@dnsmasq[-1].noresolv='0'  # Changed from 1 to 0 - critical fix!
+uci set dhcp.@dnsmasq[-1].localservice='0'  # Allow from all networks
 uci add_list dhcp.@dnsmasq[-1].server='1.1.1.1'  # Cloudflare DNS
 uci add_list dhcp.@dnsmasq[-1].server='9.9.9.9'  # Quad9 DNS
 uci add_list dhcp.@dnsmasq[-1].server='8.8.8.8'  # Google DNS
@@ -135,12 +125,26 @@ else
 end
 
 # Process maclist.csv for static DHCP leases
-set MACLIST_PATH "$BASE_DIR/maclist.csv"
+set MACLIST_FILES "$PROFILE_DIR/maclist.csv" "$CONFIG_DIR/maclist.csv" "$BASE_DIR/maclist.csv"
+set MACLIST_PATH ""
+
+for file_path in $MACLIST_FILES
+  if test -f "$file_path"
+    set MACLIST_PATH "$file_path"
+    echo "$green""Found MAC list file at: $file_path""$reset"
+    break
+  end
+end
+
 if test -f "$MACLIST_PATH"
   echo "$blue""Processing maclist.csv for static DHCP leases...""$reset"
   set line_count 0
   set error_count 0
   set success_count 0
+  
+  # Initialize a global MAC_ADDRESSES array that will be used by the wireless script
+  # This creates a robust data flow between the DHCP and wireless scripts
+  set -g MAC_ADDRESSES
   
   # Using fish's builtin line reading capabilities
   while read -l line
@@ -159,10 +163,8 @@ if test -f "$MACLIST_PATH"
       # Validate that we have all required fields
       if test (count $fields) -lt 4
         set error_count (math $error_count + 1)
-        if test "$DEBUG" = "true"
-          echo "$red""Warning: Invalid line format in maclist.csv on line $line_count: $line""$reset"
-          echo "$yellow""Expected format: MAC,IP,NAME,NETWORK""$reset"
-        end
+        echo "$red""Error: Invalid line format in maclist.csv on line $line_count: $line""$reset"
+        echo "$yellow""Expected format: MAC,IP,NAME,NETWORK""$reset"
         continue
       end
       
@@ -172,29 +174,37 @@ if test -f "$MACLIST_PATH"
       set device_name (string trim "$fields[3]")
       set network_name (string trim "$fields[4]")
       
-      # Validate MAC address format - only show detailed errors in debug mode
+      # Validate MAC address format with more flexible regex
       if not string match -q -r '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$' "$mac_addr"
         set error_count (math $error_count + 1)
-        if test "$DEBUG" = "true"
-          echo "$red""Warning: Invalid MAC address format in maclist.csv line $line_count: $mac_addr""$reset"
-        end
+        echo "$red""Error: Invalid MAC address format in maclist.csv line $line_count: '$mac_addr'""$reset"
         continue
       end
       
       # Convert device name to a safe UCI section name (replace hyphens and spaces with underscores)
       set device_section (string replace -a "-" "_" "$device_name" | string replace -a " " "_")
       
-      # Only show individual lease setups in debug mode
-      if test "$DEBUG" = "true"
-        echo "$blue""Setting up static lease for $device_name ($mac_addr -> $ip_addr)""$reset"
-      end
+      echo "$blue""Setting up static lease for $device_name ($mac_addr -> $ip_addr)""$reset"
       
       # Add static lease with proper UCI syntax - ensuring proper quoting and handling
       uci set "dhcp.$device_section=host"
       uci set "dhcp.$device_section.name=$device_name"
       uci set "dhcp.$device_section.mac=$mac_addr"
       uci set "dhcp.$device_section.ip=$ip_addr"
-      uci set "dhcp.$device_section.interface=$network_name"
+      
+      # Only set network if it's not empty
+      if test -n "$network_name" 
+        uci set "dhcp.$device_section.interface=$network_name"
+        echo "$green""Added static DHCP lease for $device_name on network $network_name""$reset"
+      else
+        echo "$yellow""Warning: No network specified for $device_name, using default""$reset"
+        uci set "dhcp.$device_section.interface=core"
+      end
+      
+      # Store MAC addresses with proper metadata for wireless filtering
+      # Format: MAC:DEVICE_NAME:NETWORK_NAME
+      # This ensures the wireless script has all information needed for proper filtering
+      set -a MAC_ADDRESSES "$mac_addr:$device_name:$network_name"
       
       set success_count (math $success_count + 1)
     end
@@ -202,14 +212,15 @@ if test -f "$MACLIST_PATH"
   
   # Summary output
   echo "$green""Configured $success_count static DHCP leases from maclist.csv""$reset"
+  # Clearly communicate that MAC addresses are ready for wireless configuration
+  echo "$green""Prepared $success_count MAC addresses for wireless filtering""$reset"
   if test $error_count -gt 0
     echo "$yellow""Encountered $error_count errors while processing MAC list""$reset"
-    if test "$DEBUG" != "true"
-      echo "$yellow""Run with --debug for detailed error information""$reset"
-    end
   end
 else
   echo "$yellow""Maclist file not found at: $MACLIST_PATH, skipping static lease configuration.""$reset"
+  # Set empty MAC_ADDRESSES array to prevent errors in wireless script
+  set -g MAC_ADDRESSES
 end
 
 # Note: UCI commits are handled in 98-commit.sh

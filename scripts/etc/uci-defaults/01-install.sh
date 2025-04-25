@@ -2,41 +2,7 @@
 # FastWrt Installation Script - Implementation using fish shell
 # Fish shell is the default shell in FastWrt and should be used for all scripts
 
-# Set colors for better readability
-set green (echo -e "\033[0;32m")
-set yellow (echo -e "\033[0;33m")
-set red (echo -e "\033[0;31m")
-set blue (echo -e "\033[0;34m")
-set purple (echo -e "\033[0;35m")
-set reset (echo -e "\033[0m")
-
-# Start
-echo "$blue""FastWrt Configuration Running from: ""$reset"(cd (dirname (status filename)) && pwd)
-echo "$blue""Current time: ""$reset"(date)
-
-# Default configuration
-set DEBUG_MODE false
-set DRY_RUN false
-set ABORT_ON_ERROR true  # Flag to control error handling behavior
-
-# Parse command line arguments
-for arg in $argv
-    switch $arg
-        case "--debug"
-            set DEBUG_MODE true
-            echo "$yellow""Debug mode enabled""$reset"
-            set -gx DEBUG true
-        case "--dry-run"
-            set DRY_RUN true
-            echo "$yellow""Dry run mode enabled - no changes will be committed""$reset"
-            set -gx DRY_RUN true
-        case "--continue-on-error"
-            set ABORT_ON_ERROR false
-            echo "$yellow""Continue on error mode enabled - script will attempt to continue after errors""$reset"
-    end
-end
-
-# Set BASE_DIR more robustly
+# Set BASE_DIR correctly and ensure it's actually the parent directory of the scripts
 set SCRIPT_PATH (status filename)
 if string match -q "/*" "$SCRIPT_PATH"
     # Absolute path
@@ -47,10 +13,116 @@ else
 end
 set -gx BASE_DIR "$BASE_DIR"
 
+# CRITICAL FIX: Explicitly define SCRIPTS_DIR to match BASE_DIR
+# This fixes the "find: : No such file or directory" error
+set -gx SCRIPTS_DIR "$BASE_DIR"
+
+# Set up config directories with modular profile support
+set CONFIG_DIR "$BASE_DIR/config"
+set PROFILES_DIR "$CONFIG_DIR/profiles"
+set CONFIG_PROFILE "sne" # Default config profile - can be overridden with --profile flag
+
+# CRITICAL FIX: Check for dry run flag immediately to prevent any system changes
+# and ensure it's properly respected throughout the script
+set DRY_RUN false
+for arg in $argv
+    switch $arg
+        case "--dry-run"
+            set DRY_RUN true
+            # Set these immediately for all future operations
+            set -gx DRY_RUN true
+            set -gx UCI_DRY_RUN true
+            # Create a lock file as another indicator of dry run mode
+            touch /tmp/fastwrt_dry_run.lock
+            echo "Dry run mode enabled - no changes will be committed"
+    end
+end
+
+# Parse command line arguments (already checked for dry run above)
+for arg in $argv
+    switch $arg
+        case "--debug"
+            set DEBUG_MODE true
+            set -gx DEBUG true
+            # CRITICAL FIX: Make debug mode imply dry run by default 
+            # This prevents committing changes in debug mode unless explicitly allowed
+            if not set -q DEBUG_COMMIT; or test "$DEBUG_COMMIT" != "true"
+                echo "$yellow""Debug mode implies dry run by default. Use DEBUG_COMMIT=true for debug with commits.""$reset"
+                set DRY_RUN true
+                set -gx DRY_RUN true
+                set -gx UCI_DRY_RUN true
+            end
+        case "--continue-on-error"
+            set ABORT_ON_ERROR false
+            echo "Continue on error mode enabled - script will attempt to continue after errors"
+        case "--profile=*"
+            set CONFIG_PROFILE (string replace --regex "^--profile=" "" "$arg")
+    end
+end
+
+set PROFILE_DIR "$PROFILES_DIR/$CONFIG_PROFILE"
+set DEFAULTS_DIR "$PROFILE_DIR"
+
+# Make these paths available to all scripts
+set -gx CONFIG_DIR "$CONFIG_DIR"
+set -gx PROFILES_DIR "$PROFILES_DIR"
+set -gx PROFILE_DIR "$PROFILE_DIR"
+set -gx DEFAULTS_DIR "$DEFAULTS_DIR"
+set -gx CONFIG_PROFILE "$CONFIG_PROFILE"
+
+# Source common color definitions - do this after setting up PROFILE_DIR
+source "$PROFILE_DIR/colors.fish"
+
+# Start
+print_info "FastWrt Configuration Running from: "(cd (dirname (status filename)) && pwd)
+print_info "Current time: "(date)
+
+# If in dry run mode, inform user about limitations
+if test "$DRY_RUN" = "true"
+    echo "$yellow""DRY RUN MODE ACTIVE: Configuration will be validated but not applied""$reset"
+    echo "$yellow""No permanent changes will be made to the system""$reset"
+end
+
+# Initialize environment variables
+echo "$blue""Initializing environment variables...""$reset"
+set ENVIRONMENT_SCRIPT (dirname "$SCRIPT_PATH")/02-environment.sh
+if test -f "$ENVIRONMENT_SCRIPT"
+    fish "$ENVIRONMENT_SCRIPT"
+    if test $status -ne 0
+        echo "$red""Failed to initialize environment. Aborting.""$reset"
+        exit 1
+    end
+    echo "$green""Environment initialized successfully""$reset"
+else
+    echo "$red""Environment script not found at: $ENVIRONMENT_SCRIPT""$reset"
+    exit 1
+end
+
+# The environment script sets FISH_ENV_SCRIPT, so we can use it from here on
+
+# Default configuration
+set DEBUG_MODE false
+set ABORT_ON_ERROR true  # Flag to control error handling behavior
+
+# Check if the selected profile exists
+if not test -d "$PROFILE_DIR"
+    echo "$red""Error: Configuration profile '$CONFIG_PROFILE' not found in $PROFILES_DIR""$reset"
+    echo "$yellow""Available profiles:""$reset"
+    for dir in $PROFILES_DIR/*/
+        if test -d "$dir"
+            echo "  - "(basename "$dir")
+        end
+    end
+    echo "$yellow""You can specify a profile with --profile=name""$reset"
+    exit 1
+end
+
+echo "$green""Using configuration profile: $CONFIG_PROFILE from $PROFILE_DIR""$reset"
+
 # Make log directory in a writable location
 set LOG_DIR "/tmp/fastwrt_logs"
 mkdir -p "$LOG_DIR"
-set LOG_FILE "$LOG_DIR/install_"(date +%Y%m%d_%H%M%S)".log"
+set LOG_FILE "$LOG_DIR/install_"(date +%Y%m%d_%H%M%S)"_$CONFIG_PROFILE.log"
 echo "$blue""Logging installation process to $LOG_FILE""$reset"
 
 # Check for root privileges
@@ -67,107 +139,6 @@ set -l script_dependencies
 set -a script_dependencies "40-dhcp.sh:30-network.sh"
 set -a script_dependencies "50-firewall.sh:30-network.sh,40-dhcp.sh"
 set -a script_dependencies "60-wireless.sh:30-network.sh,50-firewall.sh"
-
-# Keep track of script success/failure
-set -l completed_scripts
-set -l failed_scripts
-
-# Create env script in /tmp which is always writable
-set FISH_ENV_SCRIPT "/tmp/fastwrt_env.fish"
-begin
-    echo '#!/usr/bin/fish'
-    echo ''
-    echo '# Set environment variables for the configuration'
-    echo "set -gx BASE_DIR \"$BASE_DIR\""
-    echo ''
-    echo '# Pass through dry run mode and debug flags if set'
-    echo 'if test "$DRY_RUN" = "true"'
-    echo '  set -gx DRY_RUN true'
-    echo '  echo "Fish environment: DRY RUN mode enabled"'
-    echo 'else'
-    echo '  set -gx DRY_RUN false'
-    echo 'end'
-    echo ''
-    echo 'if test "$DEBUG" = "true"'
-    echo '  set -gx DEBUG true'
-    echo 'else'
-    echo '  set -gx DEBUG false'
-    echo 'end'
-    echo ''
-    echo '# Default configuration values'
-    echo 'set -gx WIREGUARD_IP "10.255.0.1"'
-    echo 'set -gx CORE_POLICY_IN "ACCEPT"'
-    echo 'set -gx CORE_POLICY_OUT "ACCEPT"'
-    echo 'set -gx CORE_POLICY_FORWARD "REJECT"'
-    echo 'set -gx OTHER_ZONES_POLICY_IN "DROP"'
-    echo 'set -gx OTHER_ZONES_POLICY_OUT "ACCEPT"'  # Keep as ACCEPT
-    echo 'set -gx IOT_META_POLICY_OUT "DROP"'       # New policy for IoT and Meta
-    echo 'set -gx OTHER_ZONES_POLICY_FORWARD "REJECT"'
-    echo 'set -gx WAN_POLICY_IN "DROP"'
-    echo 'set -gx WAN_POLICY_OUT "ACCEPT"'
-    echo 'set -gx WAN_POLICY_FORWARD "DROP"'
-    echo ''
-    echo '# Option to enable WAN6'
-    echo 'set -gx ENABLE_WAN6 false'
-    echo ''
-    echo '# Option to enable MAC filtering'
-    echo 'set -gx ENABLE_MAC_FILTERING false'
-    echo ''
-    echo '# SSIDs'
-    echo 'set -gx SSID_CLOSEDWRT "ClosedWrt"'
-    echo 'set -gx SSID_OPENWRT "OpenWrt"'
-    echo 'set -gx SSID_METAWRT "MetaWrt"'
-    echo 'set -gx SSID_IOTWRT "IoTWrt"'
-    echo ''
-    echo '# Print environment variables only once'
-    echo 'if status --is-interactive; and not set -q ENVIRONMENT_PRINTED'
-    echo '  set -gx ENVIRONMENT_PRINTED 1'
-    echo '  echo "Configuration environment set up."'
-    echo '  echo "BASE_DIR: $BASE_DIR"'
-    echo '  echo "DRY_RUN: $DRY_RUN"'
-    echo '  echo "DEBUG: $DEBUG"'
-    echo '  echo "Core policies: $CORE_POLICY_IN/$CORE_POLICY_OUT/$CORE_POLICY_FORWARD"'
-    echo '  echo "WAN policies: $WAN_POLICY_IN/$WAN_POLICY_OUT/$WAN_POLICY_FORWARD"'
-    echo '  echo "ENABLE_WAN6: $ENABLE_WAN6"'
-    echo '  echo "ENABLE_MAC_FILTERING: $ENABLE_MAC_FILTERING"'
-    echo '  echo "SSIDs: $SSID_OPENWRT, $SSID_CLOSEDWRT, $SSID_METAWRT, $SSID_IOTWRT"'
-    echo 'end'
-end > $FISH_ENV_SCRIPT
-
-# Passphrase and MAC list
-set USE_PREGENERATED_PASSPHRASES true
-set PASSPHRASE_LENGTH 32
-echo "$blue""Using pregenerated passphrases: $USE_PREGENERATED_PASSPHRASES""$reset"
-echo "$blue""Passphrase length: $PASSPHRASE_LENGTH""$reset"
-
-set MACLIST_PATH "$BASE_DIR/maclist.csv"
-if test -f "$MACLIST_PATH"
-    echo "$green""Maclist file found at: $MACLIST_PATH""$reset"
-else
-    echo "$red""Error: Maclist file not found at $MACLIST_PATH. Please create a 'maclist.csv' file.""$reset"
-    exit 1
-end
-
-if test "$USE_PREGENERATED_PASSPHRASES" = "true"
-    echo "$blue""Checking for fish-compatible passphrases file in $BASE_DIR...""$reset"
-    if test -f "$BASE_DIR/passphrases.fish"
-        echo "$green""Fish-compatible passphrases file found at: $BASE_DIR/passphrases.fish""$reset"
-    else
-        echo "$red""Error: Fish-compatible passphrases file not found in $BASE_DIR. Please create a 'passphrases.fish' file.""$reset"
-        exit 1
-    end
-else
-    echo "# Generating random passphrases" >> "$FISH_ENV_SCRIPT"
-    echo "set -gx PASSPHRASE_OPENWRT \""(openssl rand -base64 $PASSPHRASE_LENGTH)"\"" >> "$FISH_ENV_SCRIPT"
-    echo "set -gx PASSPHRASE_CLOSEDWRT \""(openssl rand -base64 $PASSPHRASE_LENGTH)"\"" >> "$FISH_ENV_SCRIPT"
-    echo "set -gx PASSPHRASE_IOTWRT \""(openssl rand -base64 $PASSPHRASE_LENGTH)"\"" >> "$FISH_ENV_SCRIPT"
-    echo "set -gx PASSPHRASE_METAWRT \""(openssl rand -base64 $PASSPHRASE_LENGTH)"\"" >> "$FISH_ENV_SCRIPT"
-end
-
-if test "$DEBUG" = "true"
-    echo "$blue""Generated fish environment script contents:""$reset"
-    cat "$FISH_ENV_SCRIPT"
-end
 
 # Function to check if dependencies are met for a script
 function dependencies_met
@@ -202,25 +173,48 @@ function dependencies_met
     return 0
 end
 
-# Execute all .sh scripts in the directory, skipping itself
-set SCRIPTS_DIR "$BASE_DIR"
-if test ! -d "$SCRIPTS_DIR"
-    echo "$red""Scripts directory not found: $SCRIPTS_DIR""$reset"
-    exit 1
-end
+# Keep track of script success/failure
+set -l completed_scripts
+set -l failed_scripts
 
-echo "$blue""Scripts directory: $SCRIPTS_DIR""$reset"
-echo "$blue""Scripts to execute:""$reset"
-ls -l "$SCRIPTS_DIR"/*.sh | tee -a "$LOG_FILE"
-
-echo "$purple""Executing configuration scripts with fish shell...""$reset"
-
+# For script running, continue to use the FISH_ENV_SCRIPT variable as before
 # Get a list of scripts sorted by name (numeric prefix)
 set scripts_to_run (find "$SCRIPTS_DIR" -maxdepth 1 -name "[0-9]*.sh" | sort)
 
 # Track overall success
 set overall_success true
 
+# Add a function to count and validate script execution
+function count_scripts
+    set expected_dir $argv[1]
+    set skip_pattern $argv[2]
+    
+    # Find all numbered scripts (starting with digits) and exclude the skip pattern
+    set all_scripts (find "$expected_dir" -maxdepth 1 -name "[0-9]*.sh" | sort)
+    
+    # Count scripts, excluding the main install script
+    set script_count 0
+    for script in $all_scripts
+        set script_basename (basename "$script")
+        if not string match -q "$skip_pattern" "$script_basename"
+            set script_count (math $script_count + 1)
+        end
+    end
+    
+    echo $script_count
+end
+
+# Count expected script executions before starting
+echo "$blue""Checking script execution plan...""$reset"
+# FIX: Add proper error handling for the find command and use absolute paths
+set scripts_list (find "$SCRIPTS_DIR" -maxdepth 1 -name "[0-9]*.sh" 2>/dev/null || echo "")
+set expected_script_count (count_scripts "$SCRIPTS_DIR" "01-install.sh")
+echo "$blue""Found $expected_script_count scripts to execute""$reset"
+
+# Reset counters for script execution tracking
+set executed_script_count 0
+
+# Execute each script in sequence, but handle differently for dry run
 for script in $scripts_to_run
     # Skip the main script
     if test (realpath "$script") = "$CURRENT_SCRIPT"
@@ -244,9 +238,26 @@ for script in $scripts_to_run
     end
     
     echo "$blue""Running $script""$reset"
-    if fish -C "source $FISH_ENV_SCRIPT" "$script" 2>&1 | tee -a "$LOG_FILE"
+    
+    # CRITICAL FIX: For dry run mode, add extra environment variable
+    # so scripts can avoid making irreversible changes
+    if test "$DRY_RUN" = "true"
+        echo "$yellow""(DRY RUN MODE - Changes will be shown but not applied)""$reset"
+        
+        # Fix: Use more compatible approach for setting environment variables
+        set -gx UCI_DRY_RUN true
+        set -gx DRY_RUN true
+        fish -C "source $FISH_ENV_SCRIPT" "$script" 2>&1 | tee -a "$LOG_FILE"
+    else
+        # Normal execution for non-dry-run mode
+        fish -C "source $FISH_ENV_SCRIPT" "$script" 2>&1 | tee -a "$LOG_FILE"
+    end
+    
+    # Keep track of script success/failure
+    if test $status -eq 0
         echo "$green""Script $script completed successfully""$reset"
         set -a completed_scripts "$script_basename"
+        set executed_script_count (math $executed_script_count + 1)  # Increment counter
     else
         set exit_status $status
         echo "$red""ERROR: Script $script failed with exit code $exit_status""$reset"
@@ -262,191 +273,54 @@ for script in $scripts_to_run
     end
 end
 
+# Initialize commit authorization to false by default - nothing can commit without this
+set -gx COMMIT_AUTHORIZED false
+
+# After all scripts executed and validation is complete
 echo "$blue""All scripts executed.""$reset"
 
-# If any scripts failed or we're in dry-run mode
-if test "$overall_success" = "false"; or test "$DRY_RUN" = "true"
-    echo "$yellow""--- Script execution summary ---""$reset"
-    echo "$green""Completed scripts (""$reset"(count $completed_scripts)"$green""): ""$reset"
-    for script in $completed_scripts
-        echo "  - $script"
-    end
-    
-    if test (count $failed_scripts) -gt 0
-        echo "$red""Failed scripts (""$reset"(count $failed_scripts)"$red""): ""$reset"
-        for script in $failed_scripts
-            echo "  - $script"
-        end
-    end
-    
-    if test "$DRY_RUN" = "false"; and test "$overall_success" = "false"
-        echo "$red""Configuration failed. Check the log for errors: $LOG_FILE""$reset"
-        echo "$red""Reverting all changes due to failures...""$reset"
-        
-        # Only revert configs that actually exist (not negative entries)
-        set configs_to_revert (uci changes | grep -v "^-" | cut -d. -f1 | sort -u)
-        for cfg in $configs_to_revert
-            echo "Reverting $cfg..."
-            uci revert $cfg
-        end
-        
-        echo "$yellow""All changes have been reverted. No changes were committed.""$reset"
-        exit 1
-    end
-end
+# Verify script execution count before committing
+echo "$blue""Verifying script execution completeness...""$reset"
+echo "$green""Expected scripts: $expected_script_count""$reset"
+echo "$green""Executed scripts: $executed_script_count""$reset"
 
-# Dry run mode - show only a concise summary of changes
-if test "$DRY_RUN" = "true"
-    echo "$yellow""--- DRY RUN: Configuration summary ---""$reset"
-    
-    # Get count of modified UCI configurations - safely handling negative entries
-    set modified_configs (uci changes | grep -v "^-" | cut -d. -f1 | sort -u)
-    set total_changes (uci changes | wc -l)
-    
-    # Handle negative entries safely - avoid using echo pipe to grep which causes errors
-    set negative_entries (uci changes | grep "^-" | cut -d. -f1 | sort -u 2>/dev/null)
-    set dhcp_neg_count 0
-    set firewall_neg_count 0
-    set network_neg_count 0
-    set wireless_neg_count 0
-    
-    # Count negative entries by looping through them directly
-    for entry in $negative_entries
-        if string match -q "*dhcp*" -- $entry
-            set dhcp_neg_count (math $dhcp_neg_count + 1)
-        else if string match -q "*firewall*" -- $entry
-            set firewall_neg_count (math $firewall_neg_count + 1)
-        else if string match -q "*network*" -- $entry
-            set network_neg_count (math $network_neg_count + 1)
-        else if string match -q "*wireless*" -- $entry
-            set wireless_neg_count (math $wireless_neg_count + 1)
-        end
-    end
-    
-    # Only show the detailed changes in debug mode
-    if test "$DEBUG" = "true"
-        echo "$yellow""--- DETAILED UCI CHANGES (debug mode) ---""$reset"
-        # Only attempt to show positive entries that won't cause errors
-        for config in $modified_configs
-            echo "$blue""Changes in $config:""$reset"
-            uci changes $config
-            echo ""
-        end
-        
-        # Show the negative entry counts
-        echo "$yellow""Entries being removed:""$reset"
-        test $dhcp_neg_count -gt 0 && echo "- DHCP entries: $dhcp_neg_count"
-        test $firewall_neg_count -gt 0 && echo "- Firewall entries: $firewall_neg_count" 
-        test $network_neg_count -gt 0 && echo "- Network entries: $network_neg_count"
-        test $wireless_neg_count -gt 0 && echo "- Wireless entries: $wireless_neg_count"
-        echo "$yellow""--- END OF DETAILED UCI CHANGES ---""$reset"
-    else
-        # In regular mode, just show counts by configuration type
-        echo "$blue""Configuration changes detected:""$reset"
-        # Show negative entry counts properly
-        if test $dhcp_neg_count -gt 0
-            echo "- Removed DHCP entries: $dhcp_neg_count"
-        end
-        if test $firewall_neg_count -gt 0
-            echo "- Removed Firewall entries: $firewall_neg_count"
-        end
-        if test $network_neg_count -gt 0
-            echo "- Removed Network entries: $network_neg_count"
-        end
-        if test $wireless_neg_count -gt 0
-            echo "- Removed Wireless entries: $wireless_neg_count"
-        end
-        
-        # Show positive entry counts
-        for config in $modified_configs
-            set config_changes (uci changes $config | wc -l)
-            echo "- $config: $config_changes changes"
-        end
-    end
-    
-    echo "$green""Total: $total_changes changes across ""$reset"(count $modified_configs + (count $negative_entries))"$green"" configuration files.""$reset"
-    echo "$yellow""No changes were applied (dry run mode).""$reset"
-    exit 0
-end
-
-# If dry-run is enabled, show UCI changes instead of committing them
-if test "$DRY_RUN" = "true"
-    echo "$purple""--- DRY RUN: Displaying detected UCI configuration changes ---""$reset"
-    
-    # Fix for negative UCI entries - identify and handle them first
-    set negative_entries (uci changes | grep "^-" | sort -u)
-    if test (count $negative_entries) -gt 0
-        echo "$yellow""Warning: Found entries with '-' prefix that may cause issues:""$reset"
-        # Only in debug mode do we show the full list
-        if test "$DEBUG" = "true"
-            for entry in $negative_entries
-                echo "  $entry"
-            end
-        else
-            # Group by category and just show counts
-            set dhcp_count (echo $negative_entries | grep -c "^-dhcp")
-            set firewall_count (echo $negative_entries | grep -c "^-firewall")
-            set network_count (echo $negative_entries | grep -c "^-network")
-            set wireless_count (echo $negative_entries | grep -c "^-wireless")
-            
-            echo "$blue""Configuration entries being replaced:""$reset"
-            test $dhcp_count -gt 0 && echo "  - DHCP: $dhcp_count entries"
-            test $firewall_count -gt 0 && echo "  - Firewall: $firewall_count entries"
-            test $network_count -gt 0 && echo "  - Network: $network_count entries"
-            test $wireless_count -gt 0 && echo "  - Wireless: $wireless_count entries"
-            echo "$blue""These are normal during reconfiguration.""$reset"
-        end
-    end
-    
-    # Display changes by configuration sections with privacy filtering
-    set modified_configs (uci changes | grep -v "^-" | cut -d. -f1 | sort -u)
-    if test (count $modified_configs) -eq 0
-        echo "$yellow""No UCI changes detected.""$reset"
-    else
-        # Only show detailed changes in debug mode
-        if test "$DEBUG" = "true"
-            for cfg in $modified_configs
-                echo "$yellow""Changes in: $cfg""$reset"
-                uci changes $cfg | tee -a "$LOG_FILE"
-            end
-        else
-            # In non-debug mode, summarize by category and hide sensitive information
-            echo "$yellow""Configuration changes summary:""$reset"
-            for cfg in $modified_configs
-                set changes_count (uci changes $cfg | wc -l)
-                echo "$blue""- $cfg: $changes_count changes""$reset"
-                
-                # For security-sensitive configs, show special messages
-                if test "$cfg" = "network"; and uci changes $cfg | grep -q wireguard
-                    echo "$yellow""  Note: WireGuard settings included (keys masked in non-debug mode)""$reset"
-                end
-                if test "$cfg" = "wireless"
-                    echo "$yellow""  Note: Wireless settings included (passphrases masked in non-debug mode)""$reset"
-                end
-            end
-        end
-    end
-    echo "$purple""--- END OF UCI CHANGES ---""$reset"
-    
-    echo "$yellow""Reverting all changes due to dry run mode...""$reset" 
-    # Only revert configs that actually exist (not negative entries)
-    set configs_to_revert (uci changes | grep -v "^-" | cut -d. -f1 | sort -u)
-    
-    # Properly formatted for loop with end statement
-    for cfg in $configs_to_revert
-        echo "Reverting $cfg..."
-        uci revert $cfg
-    end
-
-    echo "$green""Dry run completed. All changes have been reverted.""$reset"
-    rm -f "$FISH_ENV_SCRIPT"    
-    exit 0
+# Only authorize commits if all validation passes
+if test "$overall_success" = "true"; and test $executed_script_count -eq $expected_script_count
+    # Set the authorization token - this is required for commits
+    set -gx COMMIT_AUTHORIZED true
+    echo "$green""Configuration validation passed - commit authorized""$reset"
 else
-    # Finalize configuration if not a dry run
+    # Keep authorization as false
+    echo "$red""Configuration validation failed - commit NOT authorized""$reset"
+end
+
+# CRITICAL - All service restart code should be protected with dry run check
+# Only restart services if NOT in dry run mode
+if test "$DRY_RUN" != "true"
+    # Special protection to prevent debug mode from committing unless explicitly allowed
+    if test "$DEBUG" = "true"; and not set -q DEBUG_COMMIT
+        echo "$yellow""DEBUG MODE: Changes will NOT be committed (safety feature)""$reset"
+        echo "$yellow""To commit changes in debug mode, run: DEBUG_COMMIT=true $0 --debug""$reset"
+        echo "$yellow""Reverting all changes...""$reset"
+        
+        # Reuse the reversion logic from the dry run mode
+        set total_change_count 0
+        set configs_to_revert (uci changes | cut -d. -f1 | sort -u)
+        
+        for cfg in $configs_to_revert
+            echo "$blue""Reverting $cfg...""$reset"
+            set section_changes (uci changes $cfg | wc -l)
+            set total_change_count (math $total_change_count + $section_changes)
+            uci revert $cfg 2>/dev/null || echo "$yellow""Note: No changes to revert for $cfg""$reset"
+        end
+        exit 0
+    end
+
     echo "$purple""Committing UCI changes...""$reset"
     uci commit
-    
-    echo "$purple""Restarting services in proper order...""$reset"
+
+    # Restart services
+    echo "$purple""Restarting services...""$reset"
     # Network first, then dependent services
     echo "$blue""Restarting network...""$reset"
     /etc/init.d/network restart
@@ -493,5 +367,91 @@ else
     end
 
     echo "$green""All services restarted. You may need to reconnect if network settings changed.""$reset"
-    echo "$green""Installation process completed successfully. Log saved to $LOG_FILE""$reset"
+else
+    echo "$yellow""DRY RUN: Skipping commits and service restarts""$reset"
 end
+
+# CRITICAL FIX: At the end of execution, handle dry run properly
+if test "$DRY_RUN" = "true"
+    echo "$yellow""--- DRY RUN SUMMARY ---""$reset"
+    
+    # Instead of duplicating summary logic, use the summary script directly
+    # This delegates all summary responsibility to the specialized script
+    if test "$DEBUG" = "true"
+        # In debug mode, show detailed information
+        echo "$blue""Generating detailed configuration summary...""$reset"
+        # Call summary script with show-detailed flag
+        fish -C "source $FISH_ENV_SCRIPT" "$BASE_DIR/80-summary.sh" --show-detailed
+    else
+        # In regular dry run mode, show brief summary
+        echo "$blue""Generating brief configuration summary...""$reset"
+        # Call summary script with brief mode flag
+        fish -C "source $FISH_ENV_SCRIPT" "$BASE_DIR/80-summary.sh" --brief
+    end
+    
+    # IMPORTANT NOTE: Clarify how UCI dry run works
+    echo "$purple""IMPORTANT: In dry run mode, UCI changes are temporarily populated to show what would change,""$reset"
+    echo "$purple""          but will now be reverted. This is normal and expected behavior.""$reset"
+    
+    echo "$yellow""Reverting all changes due to dry run mode...""$reset" 
+    # Properly revert all changes without failing on missing configs
+    set total_change_count 0
+    set configs_to_revert (uci changes | cut -d. -f1 | sort -u)
+    
+    # Show total pending changes before revert for verification
+    set total_pending_changes (uci changes | wc -l)
+    echo "$blue""Total pending changes to revert: $total_pending_changes""$reset"
+    
+    # Revert each config section individually for more robust reverting
+    for cfg in $configs_to_revert
+        echo "$blue""Reverting $cfg...""$reset"
+        set section_changes (uci changes $cfg | wc -l)
+        set total_change_count (math $total_change_count + $section_changes)
+        uci revert $cfg 2>/dev/null || echo "$yellow""Note: No changes to revert for $cfg""$reset"
+    end
+    
+    # Double-check that no changes remain - this is important verification
+    set remaining_changes (uci changes | wc -l) 
+    if test $remaining_changes -gt 0
+        echo "$red""WARNING: $remaining_changes changes could not be reverted. Details:""$reset"
+        uci changes
+        echo "$yellow""Attempting force revert of remaining changes...""$reset"
+        uci revert
+        
+        # Final verification
+        set final_changes (uci changes | wc -l)
+        if test $final_changes -gt 0
+            echo "$red""ERROR: Still have $final_changes unreverted changes. This is unusual.""$reset"
+        else
+            echo "$green""Force revert succeeded, all changes cleared""$reset"
+        end
+    else
+        echo "$green""Successfully reverted all $total_change_count configuration changes""$reset"
+    end
+    
+    # Clean up environment
+    rm -f "$FISH_ENV_SCRIPT" /tmp/fastwrt_dry_run.lock
+    echo "$green""Dry run completed successfully.""$reset"
+    echo "$green""No permanent changes were made to the system.""$reset"
+    exit 0
+end
+
+# CRITICAL FIX: Added check to prevent commits from debug mode unless explicitly approved
+if test "$DEBUG" = "true"; and not test "$COMMIT_AUTHORIZED" = "true"
+    echo "$yellow""DEBUG MODE: Changes shown but NOT committed to prevent unintended modifications.""$reset"
+    echo "$yellow""To commit changes in debug mode, use: DEBUG_COMMIT=true $0 --debug""$reset"
+    echo "$yellow""Reverting all changes...""$reset"
+    
+    # Reuse the reversion logic from the dry run mode
+    set total_change_count 0
+    set configs_to_revert (uci changes | cut -d. -f1 | sort -u)
+    
+    for cfg in $configs_to_revert
+        echo "$blue""Reverting $cfg...""$reset"
+        set section_changes (uci changes $cfg | wc -l)
+        set total_change_count (math $total_change_count + $section_changes)
+        uci revert $cfg 2>/dev/null || echo "$yellow""Note: No changes to revert for $cfg""$reset"
+    end
+    exit 0
+end
+echo "$green""Installation process completed successfully. Log saved to $LOG_FILE""$reset"

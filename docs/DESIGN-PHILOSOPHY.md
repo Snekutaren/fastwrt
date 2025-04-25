@@ -92,6 +92,8 @@ FastWrt provides clear, color-coded feedback during execution:
 - Red: Errors and critical issues
 - Blue: Information messages
 - Purple: Section headers and major process indicators
+- Orange: Security-related warnings and advisories
+- Cyan: Configuration values and technical details
 
 ## Development Guidelines
 

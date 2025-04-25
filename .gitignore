@@ -2,6 +2,7 @@
 
 # Ignore log files
 *.log
+/logs/
 
 # Ignore temporary files
 *.tmp
@@ -30,6 +31,8 @@ __pycache__/
 
 # Ignore all passphrase files (both original and fish-compatible)
 passphrases*
+passphrases.fish
+scripts/etc/uci-defaults/config/defaults/passphrases.fish
 
 # Ignore the external MAC list file
 maclist
@@ -46,3 +49,74 @@ README.md
 
 # Ignore keys
 id_ed25519*
+
+# Ignore WireGuard keys file with sensitive information
+scripts/etc/uci-defaults/wgkeys.fish
+scripts/etc/uci-defaults/config/defaults/wgkeys.fish
+
+# Ignore router password file (keeping for backward compatibility)
+scripts/etc/uci-defaults/rpasswd.fish
+scripts/etc/uci-defaults/config/defaults/rpasswd.fish
+
+# Ignore everything in the config folder
+scripts/etc/uci-defaults/config/
+scripts/etc/uci-defaults/config/*
+scripts/etc/uci-defaults/config/profiles/*/
+
+# SSH keys in any location
+scripts/etc/uci-defaults/ssh_keys/
+**/ssh_keys/*.pub
+**/ssh_keys/*.key
+
+# Keep profile directory structure
+!scripts/etc/uci-defaults/config/profiles/
+!scripts/etc/uci-defaults/config/profiles/.gitkeep
+
+# Ignore sensitive information files anywhere in the repository
+# These patterns will match sensitive files regardless of their location and extension
+**/wgkeys.*
+**/rpasswd.*
+**/passphrases.*
+**/*.key
+**/*.pem
+**/*.crt
+**/*.pfx
+**/*.p12
+**/*.jks
+**/*.keystore
+**/*.truststore
+**/*.secrets
+**/*.credentials
+**/*.password
+**/*.token
+**/*.auth
+**/*.config
+
+# Ignore WireGuard keys file with sensitive information (legacy paths)
+scripts/etc/uci-defaults/wgkeys.fish
+
+# Ignore router password file (legacy path)
+scripts/etc/uci-defaults/rpasswd.fish
+
+# Ignore wireless passphrases file (legacy path)
+passphrases.fish
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Log files
+*.log
+/logs/
+
+# Build artifacts
+/build/
+/bin/
+/tmp/
+
+# Comment: This gitignore explicitly prevents sensitive information
+# from being committed to the repository regardless of where the files
+# are stored or what extensions they use. Always be careful when
+# committing changes to ensure no secrets are accidentally included.

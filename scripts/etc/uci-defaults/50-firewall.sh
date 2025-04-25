@@ -2,13 +2,8 @@
 # FastWrt firewall configuration script - Implementation using fish shell
 # Fish shell is the default shell in FastWrt and should be used for all scripts
 
-# Set colors for better readability
-set green (echo -e "\033[0;32m")
-set yellow (echo -e "\033[0;33m")
-set red (echo -e "\033[0;31m")
-set blue (echo -e "\033[0;34m")
-set purple (echo -e "\033[0;35m")
-set reset (echo -e "\033[0m")
+# Source common color definitions
+source "$PROFILE_DIR/colors.fish"
 
 # Ensure the script runs from its own directory
 cd $BASE_DIR
@@ -234,7 +229,7 @@ if test (count $missing_networks) -gt 0
     echo "$yellow""WARNING: The following networks referenced in firewall aren't defined yet:""$reset"
     echo "$yellow""(string join ", " $missing_networks)""$reset"
     echo "$yellow""Proceeding with firewall configuration anyway.""$reset"
-end  # Added missing end statement for this if block
+end  # Using end instead of fi for Fish shell
 
 # Core Zone
 echo "$green""Adding Core Zone (trusted network)...""$reset"
@@ -250,7 +245,7 @@ echo "$green""Adding Guest Zone (untrusted network)...""$reset"
 uci set firewall.guest='zone'
 uci set firewall.guest.name='guest'
 uci set firewall.guest.network='guest'
-uci set firewall.guest.input='DROP'
+uci set firewall.guest.input='REJECT'  # Changed from DROP to REJECT
 uci set firewall.guest.output='ACCEPT'
 uci set firewall.guest.forward='REJECT'
 
@@ -259,7 +254,7 @@ echo "$green""Adding IoT Zone...""$reset"
 uci set firewall.iot='zone'
 uci set firewall.iot.name='iot'
 uci set firewall.iot.network='iot'
-uci set firewall.iot.input='DROP'
+uci set firewall.iot.input='REJECT'  # Changed from DROP to REJECT
 uci set firewall.iot.output='DROP'
 uci set firewall.iot.forward='REJECT'
 
@@ -268,7 +263,7 @@ echo "$green""Adding Meta Zone...""$reset"
 uci set firewall.meta='zone'
 uci set firewall.meta.name='meta'
 uci set firewall.meta.network='meta'
-uci set firewall.meta.input='DROP'
+uci set firewall.meta.input='REJECT'  # Changed from DROP to REJECT
 uci set firewall.meta.output='DROP'
 uci set firewall.meta.forward='REJECT'
 
@@ -277,7 +272,7 @@ echo "$green""Adding Nexus Zone...""$reset"
 uci set firewall.nexus='zone'
 uci set firewall.nexus.name='nexus'
 uci set firewall.nexus.network='nexus'
-uci set firewall.nexus.input='DROP'
+uci set firewall.nexus.input='REJECT'  # Changed from DROP to REJECT
 uci set firewall.nexus.output='ACCEPT'
 uci set firewall.nexus.forward='REJECT'
 
@@ -286,7 +281,7 @@ echo "$green""Adding Nodes Zone...""$reset"
 uci set firewall.nodes='zone'
 uci set firewall.nodes.name='nodes'
 uci set firewall.nodes.network='nodes'
-uci set firewall.nodes.input='DROP'
+uci set firewall.nodes.input='REJECT'  # Changed from DROP to REJECT
 uci set firewall.nodes.output='ACCEPT'
 uci set firewall.nodes.forward='REJECT'
 
@@ -295,7 +290,7 @@ echo "$green""Adding WireGuard Zone...""$reset"
 uci set firewall.wireguard='zone'
 uci set firewall.wireguard.name='wireguard'
 uci set firewall.wireguard.network='wireguard'
-uci set firewall.wireguard.input='DROP'
+uci set firewall.wireguard.input='REJECT'  # Changed from DROP to REJECT
 uci set firewall.wireguard.output='ACCEPT'
 uci set firewall.wireguard.forward='REJECT'
 
@@ -311,6 +306,13 @@ if test "$ENABLE_WAN6" = "true"
 else
     echo "$yellow""IPv6 is not enabled, only including wan in WAN zone""$reset"
     uci set firewall.wan_zone.network='wan'
+end
+
+# CRITICAL FIX: Force WAN_POLICY_OUT to ACCEPT regardless of environment setting
+if test "$WAN_POLICY_OUT" != "ACCEPT"
+    echo "$red""CRITICAL SAFETY OVERRIDE: WAN output policy was set to $WAN_POLICY_OUT, forcing to ACCEPT""$reset"
+    echo "$red""Setting WAN output to anything other than ACCEPT will break internet access!""$reset"
+    set WAN_POLICY_OUT "ACCEPT"
 end
 
 uci set firewall.wan_zone.input="$WAN_POLICY_IN"
@@ -411,30 +413,59 @@ for zone in core nexus nodes meta iot guest wireguard  # Added wireguard to the 
   uci set firewall."redirect_dns_tcp_$zone".target='DNAT'
 end
 
-# Block direct external DNS
-echo "$blue""Blocking direct external DNS access...""$reset"
-uci set firewall.block_external_dns='rule'
-uci set firewall.block_external_dns.name='Block-External-DNS'
-uci set firewall.block_external_dns.src='*'
-uci set firewall.block_external_dns.dest='wan'
-uci set firewall.block_external_dns.proto='tcp udp'
-uci set firewall.block_external_dns.dest_port='53'
-uci set firewall.block_external_dns.target='REJECT'
-uci set firewall.block_external_dns.enabled='1'
+# FIX DNS ISSUES:
+# Replace the block_external_dns rule with a better implementation
+# that still blocks clients but allows the router itself to reach DNS
+echo "$blue""Configuring DNS access rules...""$reset"
+
+# Remove the old rule that blocks all external DNS
+uci -q delete firewall.block_external_dns
+
+# Add a rule to allow the router to use external DNS
+uci set firewall.router_dns_out='rule'
+uci set firewall.router_dns_out.name='Allow-Router-DNS'
+uci set firewall.router_dns_out.src='*'  # From any source 
+uci set firewall.router_dns_out.dest='wan'
+uci set firewall.router_dns_out.proto='tcp udp'
+uci set firewall.router_dns_out.dest_port='53'
+uci set firewall.router_dns_out.target='ACCEPT'
+uci set firewall.router_dns_out.priority='30'
+uci set firewall.router_dns_out.enabled='1'
+
+# Block direct client access to external DNS (keep enforcing local DNS)
+# But this time we use src_ip=!192.168.1.1 to exempt the router itself
+uci set firewall.block_client_dns='rule'
+uci set firewall.block_client_dns.name='Redirect-Client-DNS'
+uci set firewall.block_client_dns.src='*'
+uci set firewall.block_client_dns.src_ip='!10.0.0.1 !10.0.10.1 !10.0.20.1 !10.0.70.1 !10.0.80.1 !192.168.90.1'  # Exempt router IPs
+uci set firewall.block_client_dns.dest='wan'
+uci set firewall.block_client_dns.proto='tcp udp'
+uci set firewall.block_client_dns.dest_port='53'
+uci set firewall.block_client_dns.target='REJECT'
+uci set firewall.block_client_dns.enabled='1'
 
 ### SECTION 8: WIREGUARD PORT FORWARDING ###
-echo "$blue""Configuring WireGuard port forwarding...""$reset"
+echo "$blue""Configuring WireGuard firewall rules...""$reset"
 
-# Port Forward: WAN -> WireGuard
-echo "$green""Adding port forward from WAN to WireGuard...""$reset"
-uci set firewall.port_forward_wan_to_wg='redirect'
-uci set firewall.port_forward_wan_to_wg.name='PortForwardWANtoWG'
-uci set firewall.port_forward_wan_to_wg.src='wan'
-uci set firewall.port_forward_wan_to_wg.src_dport='52018'
-uci set firewall.port_forward_wan_to_wg.dest='wireguard'
-uci set firewall.port_forward_wan_to_wg.dest_ip="$WIREGUARD_IP"
-uci set firewall.port_forward_wan_to_wg.proto='udp'
-uci set firewall.port_forward_wan_to_wg.enabled='1'
+# CRITICAL: Ensure WireGuard port is open in firewall
+echo "$blue""Configuring WireGuard firewall rules...""$reset"
+if not uci -q get firewall.allow_wireguard_port > /dev/null
+    # Remove unnecessary port forwarding - WireGuard doesn't need it
+    # Port forwarding (DNAT) is for redirecting traffic to internal services
+    # WireGuard already listens directly on its interface
+    
+    echo "$blue""Adding explicit allow rule for WireGuard port...""$reset"
+    uci set firewall.allow_wireguard_port='rule'
+    uci set firewall.allow_wireguard_port.name='Allow-WireGuard-Port'
+    uci set firewall.allow_wireguard_port.src='wan'
+    uci set firewall.allow_wireguard_port.dest_port='52018'
+    uci set firewall.allow_wireguard_port.proto='udp'
+    uci set firewall.allow_wireguard_port.target='ACCEPT'
+    uci set firewall.allow_wireguard_port.enabled='1'
+    uci set firewall.allow_wireguard_port.priority='10'  # Higher priority
+    
+    echo "$blue""Configuring WireGuard traffic to use WAN zone masquerading""$reset"
+end
 
 ### SECTION 9: VERIFICATION ###
 echo "$purple""Verifying firewall configuration...""$reset"

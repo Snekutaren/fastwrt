@@ -13,54 +13,59 @@ The FastWrt configuration process follows a structured flow to ensure that compo
    - Handles error conditions
    - Commits changes or reverts them based on success
 
-2. **Backup (`10-backup.sh`)**
+2. **Environment Setup (`02-environment.sh`)**
+   - Establishes environment variables for all scripts
+   - Sets default values for configuration parameters
+   - Ensures consistent settings across all configuration scripts
+
+3. **Backup (`10-backup.sh`)**
    - Creates backups of existing configurations
    - Sets up backup directory structure
    - Archives configuration files with timestamps
 
-3. **System Settings (`20-settings.sh`)**
+4. **System Settings (`20-settings.sh`)**
    - Configures basic system parameters
    - Sets hostname, timezone, and locale
+   - Configures fish as the default shell
+   - Sets up cron jobs and system passwords
 
-4. **Network Configuration (`30-network.sh`)**
+5. **Network Configuration (`30-network.sh`)**
    - Sets up physical interfaces
    - Configures VLANs and bridge devices
    - Establishes network topology
 
-5. **DHCP Configuration (`40-dhcp.sh`)**
+6. **Wireless Setup (`35-wireless.sh`)**
+   - Configures radios and wireless interfaces
+   - Sets up SSIDs and security
+   - Links wireless networks to VLANs
+   - Manages MAC filtering for wireless networks
+
+7. **DHCP Configuration (`40-dhcp.sh`)**
    - Configures DHCP servers for each network
    - Sets up DNS resolution
    - Creates static leases from maclist.csv
 
-6. **Firewall Rules (`50-firewall.sh`)**
-   - Creates security zones
-   - Establishes access policies
-   - Sets up port forwarding and NAT
-
-7. **WireGuard VPN (`55-wireguard.sh`)**
+8. **WireGuard VPN (`45-wireguard.sh`)**
    - Configures secure VPN access
    - Generates keys and sets up interfaces
    - Establishes secure remote access channels
 
-8. **Wireless Setup (`60-wireless.sh`)**
-   - Configures radios and wireless interfaces
-   - Sets up SSIDs and security
-   - Links wireless networks to VLANs
+9. **Firewall Rules (`50-firewall.sh`)**
+   - Creates security zones
+   - Establishes access policies
+   - Sets up port forwarding and NAT
+   - Configures DNS redirection and security rules
 
-9. **SSH Configuration (`70-dropbear.sh`)**
-   - Configures secure SSH access
-   - Sets up key-based authentication
-   - Restricts SSH access to secure networks
+10. **SSH Configuration (`70-dropbear.sh`)**
+    - Configures secure SSH access
+    - Sets up key-based authentication
+    - Restricts SSH access to secure networks
 
-10. **Verification (`80-summary.sh`)**
+11. **Verification (`80-summary.sh`)**
     - Summarizes pending changes
     - Validates configuration for potential issues
     - Creates logs for troubleshooting
-
-11. **Final Setup (`99-first-boot.sh`)**
-    - Sets up initial access credentials
-    - Creates welcome banner
-    - Performs any first-boot only tasks
+    - Authorizes or denies final commit based on validation
 
 ## Dependency Management
 
@@ -68,8 +73,9 @@ FastWrt tracks dependencies between scripts to ensure proper execution order:
 
 ```
 40-dhcp.sh      → depends on → 30-network.sh
+45-wireguard.sh → depends on → 30-network.sh
 50-firewall.sh  → depends on → 30-network.sh, 40-dhcp.sh
-60-wireless.sh  → depends on → 30-network.sh, 50-firewall.sh
+35-wireless.sh  → depends on → 30-network.sh, 50-firewall.sh
 ```
 
 If a dependency fails, subsequent scripts that depend on it will be skipped to prevent cascading failures.

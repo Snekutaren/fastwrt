@@ -2,13 +2,8 @@
 # FastWrt network configuration - Implementation using fish shell
 # Fish shell is the default shell in FastWrt and should be used for all scripts
 
-# Set colors for better readability
-set green (echo -e "\033[0;32m")
-set yellow (echo -e "\033[0;33m")
-set red (echo -e "\033[0;31m")
-set blue (echo -e "\033[0;34m")
-set purple (echo -e "\033[0;35m")
-set reset (echo -e "\033[0m")
+# Source common color definitions
+source "$PROFILE_DIR/colors.fish"
 
 # Ensure the script runs from its own directory
 cd $BASE_DIR
@@ -291,7 +286,12 @@ end
 uci set network.wan='interface'
 uci set network.wan.proto='dhcp'
 uci set network.wan.device='br-wan'
-echo "$green""WAN interface configured successfully.""$reset"
+uci set network.wan.hostname='router'  # Use generic hostname instead of real one
+uci set network.wan.peerdns='0'        # Don't overwrite DNS settings with ISP DNS
+uci set network.wan.sendhost='0'       # Don't send hostname with DHCP requests
+uci set network.wan.delegate='0'       # Don't delegate DHCPv6 prefix
+uci set network.wan.macaddr='random'   # Use random MAC for privacy (if supported)
+echo "$green""WAN interface configured with enhanced security settings""$reset"
 
 # WireGuard interface - idempotent approach
 echo "$blue""Configuring WireGuard interface...""$reset"

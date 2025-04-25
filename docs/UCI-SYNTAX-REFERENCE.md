@@ -357,18 +357,43 @@ uci -q get network.lan.ipaddr || echo "Section or option not found"
 FastWrt uses color-coded output for better readability:
 
 ```bash
-# Set colors for better readability
+# Standard colors defined in colors.fish
 set green (echo -e "\033[0;32m")   # Success messages
 set yellow (echo -e "\033[0;33m")  # Warnings and notices
-set red (echo -e "\033[0;31m")     # Errors
-set blue (echo -e "\033[0;34m")    # Information
-set purple (echo -e "\033[0;35m")  # Section headers
+set red (echo -e "\033[0;31m")     # Errors and critical issues
+set blue (echo -e "\033[0;34m")    # Information and status updates
+set purple (echo -e "\033[0;35m")  # Section headers and major process indicators
+set orange (echo -e "\033[0;33m")  # Security-related warnings and advisories
+set cyan (echo -e "\033[0;36m")    # Configuration values and technical details
 set reset (echo -e "\033[0m")      # Reset color
+```
 
-# Example usage
-echo "$blue""Configuring network...""$reset"
-echo "$green""Configuration complete.""$reset"
-echo "$red""Error: Failed to set option.""$reset"
+### Standard Color Usage
+
+Each color has a specific purpose in FastWrt scripts:
+
+| Color  | Purpose | Example Usage |
+|--------|---------|---------------|
+| Green  | Success | "Configuration completed successfully" |
+| Yellow | Warning | "Network interface exists, reconfiguring..." |
+| Red    | Error   | "Failed to configure interface" |
+| Blue   | Info    | "Setting up network interfaces..." |
+| Purple | Section | "NETWORK CONFIGURATION" |
+| Orange | Security| "Access restricted for security reasons" |
+| Cyan   | Values  | "IP address: 192.168.1.1" |
+
+### Using Standard Print Functions
+
+For consistency, use the standard print functions:
+
+```bash
+print_error "Failed to configure interface"
+print_warning "Configuration already exists, overwriting"
+print_security "Found insecure SSH configuration, fixing"
+print_success "Configuration completed successfully"
+print_info "Setting up network interfaces..."
+print_start "NETWORK CONFIGURATION"
+print_value "IP address: 192.168.1.1"
 ```
 
 When using colors, always reset the color after each message to prevent color bleeding into subsequent output.

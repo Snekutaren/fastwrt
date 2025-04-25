@@ -2,13 +2,8 @@
 # FastWrt backup script - Implementation using fish shell
 # Fish shell is the default shell in FastWrt and should be used for all scripts
 
-# Set colors for better readability
-set green (echo -e "\033[0;32m")
-set yellow (echo -e "\033[0;33m")
-set red (echo -e "\033[0;31m")
-set blue (echo -e "\033[0;34m")
-set purple (echo -e "\033[0;35m")
-set reset (echo -e "\033[0m")
+# Source common color definitions
+source "$PROFILE_DIR/colors.fish"
 
 # Ensure the script runs from its own directory
 cd $BASE_DIR

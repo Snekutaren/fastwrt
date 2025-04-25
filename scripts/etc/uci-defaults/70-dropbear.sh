@@ -2,13 +2,8 @@
 # FastWrt Dropbear (SSH) configuration - Implementation using fish shell
 # Fish shell is the default shell in FastWrt and should be used for all scripts
 
-# Set colors for better readability
-set green (echo -e "\033[0;32m")
-set yellow (echo -e "\033[0;33m")
-set red (echo -e "\033[0;31m")
-set blue (echo -e "\033[0;34m")
-set purple (echo -e "\033[0;35m")
-set reset (echo -e "\033[0m")
+# Source common color definitions
+source "$PROFILE_DIR/colors.fish"
 
 # Ensure the script runs from its own directory
 cd $BASE_DIR
@@ -34,9 +29,9 @@ if test -f "/etc/FastWrt/ssh_keys/id_ed25519.pub"
     cat "/etc/FastWrt/ssh_keys/id_ed25519.pub" >> /etc/dropbear/authorized_keys
     echo "$green""SSH key added successfully from installed id_ed25519.pub""$reset"
 else
-    # Then check for keys in the ssh_keys directory
-    echo "$blue""Looking for keys in $BASE_DIR/ssh_keys...""$reset"
-    set ssh_keys_dir "$BASE_DIR/ssh_keys"
+    # Then check for keys in the profile's ssh_keys directory
+    echo "$blue""Looking for keys in $PROFILE_DIR/ssh_keys...""$reset"
+    set ssh_keys_dir "$PROFILE_DIR/ssh_keys"
     set keys_found 0
     
     if test -d "$ssh_keys_dir"
@@ -55,6 +50,32 @@ else
                     echo "$yellow""Key from $key_file already exists in authorized_keys, skipping.""$reset"
                     # Count as found since it's already there
                     set keys_found (math $keys_found + 1)
+                end
+            end
+        end
+    end
+    
+    # If still no keys found, check the legacy location as fallback
+    if test $keys_found -eq 0
+        echo "$yellow""No keys found in profile directory, checking legacy location $BASE_DIR/ssh_keys...""$reset"
+        set legacy_ssh_keys_dir "$BASE_DIR/ssh_keys"
+        
+        if test -d "$legacy_ssh_keys_dir"
+            for key_file in $legacy_ssh_keys_dir/*.pub
+                if test -f "$key_file"
+                    echo "$green""Found legacy key file: $key_file""$reset"
+                    # Add the key without duplication - check if it exists first
+                    set key_content (cat "$key_file")
+                    if not grep -qFx "$key_content" "/etc/dropbear/authorized_keys"
+                        echo "$blue""Adding legacy key from $key_file to authorized_keys...""$reset"
+                        echo "$key_content" >> /etc/dropbear/authorized_keys
+                        echo "$green""Added legacy key from $key_file to authorized_keys""$reset"
+                        set keys_found (math $keys_found + 1)
+                    else
+                        echo "$yellow""Legacy key from $key_file already exists in authorized_keys, skipping.""$reset"
+                        # Count as found since it's already there
+                        set keys_found (math $keys_found + 1)
+                    end
                 end
             end
         end
@@ -80,7 +101,7 @@ chmod 600 /etc/dropbear/authorized_keys
 echo "$blue""Configuring Dropbear SSH server...""$reset"
 
 # Set dropbear to use port 6622 on core interface
-uci set dropbear.@dropbear[0].Interface='core'
+uci set dropbear.@dropbear[0].Interface='core wireguard'  # Add wireguard interface
 uci set dropbear.@dropbear[0].Port='6622'
 
 # Enable key-based auth and disable password auth if we have keys
@@ -93,6 +114,40 @@ else
     # Keep password auth enabled if no SSH keys are present
     uci set dropbear.@dropbear[0].PasswordAuth='on'
     uci set dropbear.@dropbear[0].RootPasswordAuth='on'
+    
+    # Apply router password if set
+    if set -q ROUTER_PASSWORD
+        echo "$blue""Setting system password from configuration...""$reset"
+        echo -e "$ROUTER_PASSWORD\n$ROUTER_PASSWORD" | passwd root > /dev/null 2>&1
+        
+        # Mask the actual password in output
+        if test "$DEBUG" = "true"
+            echo "$yellow""Password set to configured value (visible in debug mode): $ROUTER_PASSWORD""$reset"
+        else
+            echo "$yellow""Password set to configured value (use --debug to view)""$reset"
+        end
+    else
+        echo "$yellow""No router password configured, not changing system password""$reset"
+    end
+end
+
+# Check for router password file in multiple locations using profile hierarchy
+set ROUTER_PASSWORD_FILES "$PROFILE_DIR/rpasswd.fish" "$DEFAULTS_DIR/rpasswd.fish" "$CONFIG_DIR/rpasswd.fish" "$BASE_DIR/rpasswd.fish"
+set ROUTER_PASSWORD_FILE ""
+
+for file_path in $ROUTER_PASSWORD_FILES
+    if test -f "$file_path"
+        set ROUTER_PASSWORD_FILE "$file_path"
+        echo "$blue""Loading router password from: $ROUTER_PASSWORD_FILE""$reset"
+        source "$ROUTER_PASSWORD_FILE"
+        
+        if set -q ROUTER_PASSWORD
+            echo "$green""Router password loaded successfully""$reset"
+        else
+            echo "$yellow""No password set in $ROUTER_PASSWORD_FILE""$reset"
+        end
+        break
+    end
 end
 
 # Set other security options
