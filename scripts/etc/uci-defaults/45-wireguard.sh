@@ -158,7 +158,11 @@ function add_wireguard_peer
     # CRITICAL FIX: Format allowed_ips as a list with individual entries for better compatibility
     uci delete network.$section_name.allowed_ips 2>/dev/null
     uci add_list network.$section_name.allowed_ips="$client_ip/32"
-    uci add_list network.$section_name.allowed_ips="0.0.0.0/0"
+    uci add_list network.$section_name.allowed_ips="10.0.0.0/24"
+    uci add_list network.$section_name.allowed_ips="10.0.10.0/24"
+    uci add_list network.$section_name.allowed_ips="10.0.20.0/24"
+    uci add_list network.$section_name.allowed_ips="10.255.0.0/24"
+    
     uci set network.$section_name.description="$name"
     
     # Apply the persistent keepalive setting to ensure mobile connections stay active

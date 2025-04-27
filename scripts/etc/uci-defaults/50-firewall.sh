@@ -247,8 +247,19 @@ uci set firewall.allow_ping.family='ipv4'
 uci set firewall.allow_ping.target='ACCEPT'
 uci set firewall.allow_ping.enabled='1'
 
-# Add IPv6 rules for WAN6 regardless of ENABLE_WAN6
+# Add IPv6 rules for WAN6 - rules will be created but disabled when IPv6 is not enabled
 echo "$green""Creating WAN6 (IPv6) rules...""$reset"
+
+# First determine if IPv6 should be enabled based on configuration
+if test "$ENABLE_WAN6" = "true"
+    echo "$blue""IPv6 is enabled, creating active IPv6 firewall rules""$reset"
+    set ipv6_enabled '1'
+else
+    echo "$yellow""IPv6 is disabled, creating IPv6 rules in disabled state""$reset"
+    set ipv6_enabled '0'
+end
+
+# ICMPv6 Input rules - essential for IPv6 operation
 uci set firewall.allow_icmpv6_input='rule'
 uci set firewall.allow_icmpv6_input.name='Allow-ICMPv6-Input'
 uci set firewall.allow_icmpv6_input.proto='icmp'
@@ -256,7 +267,9 @@ uci set firewall.allow_icmpv6_input.icmp_type='echo-request destination-unreacha
 uci set firewall.allow_icmpv6_input.limit='1000/sec'
 uci set firewall.allow_icmpv6_input.family='ipv6'
 uci set firewall.allow_icmpv6_input.target='ACCEPT'
+uci set firewall.allow_icmpv6_input.enabled="$ipv6_enabled"
 
+# ICMPv6 Forward rules
 uci set firewall.allow_icmpv6_forward='rule'
 uci set firewall.allow_icmpv6_forward.name='Allow-ICMPv6-Forward'
 uci set firewall.allow_icmpv6_forward.dest='*'
@@ -265,7 +278,9 @@ uci set firewall.allow_icmpv6_forward.icmp_type='echo-request destination-unreac
 uci set firewall.allow_icmpv6_forward.limit='1000/sec'
 uci set firewall.allow_icmpv6_forward.family='ipv6'
 uci set firewall.allow_icmpv6_forward.target='ACCEPT'
+uci set firewall.allow_icmpv6_forward.enabled="$ipv6_enabled"
 
+# DHCPv6 rules
 uci set firewall.allow_dhcpv6='rule'
 uci set firewall.allow_dhcpv6.name='Allow-DHCPv6'
 uci set firewall.allow_dhcpv6.proto='udp'
@@ -274,6 +289,10 @@ uci set firewall.allow_dhcpv6.src_port='547'
 uci set firewall.allow_dhcpv6.dest_port='546'
 uci set firewall.allow_dhcpv6.family='ipv6'
 uci set firewall.allow_dhcpv6.target='ACCEPT'
+uci set firewall.allow_dhcpv6.enabled="$ipv6_enabled"
+
+# Future IPv6 rules can follow this pattern
+echo "$green""IPv6 firewall rules created (enabled=$ipv6_enabled)""$reset"
 
 ### SECTION 5: ZONE CONFIGURATION ###
 echo "$blue""Configuring firewall zones...""$reset"

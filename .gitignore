@@ -50,6 +50,9 @@ README.md
 # Ignore keys
 id_ed25519*
 
+# Simply credentials
+simply.credentials
+
 # Ignore WireGuard keys file with sensitive information
 scripts/etc/uci-defaults/wgkeys.fish
 scripts/etc/uci-defaults/config/defaults/wgkeys.fish
