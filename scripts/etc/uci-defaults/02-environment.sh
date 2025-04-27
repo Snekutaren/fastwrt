@@ -50,10 +50,10 @@ begin
     
     echo ''
     echo '# Default network configuration values'
-    if not set -q WIREGUARD_IP
-        echo '  set -gx WIREGUARD_IP "10.255.0.1"'
-        echo 'end'
-    end  # Added missing end statement here to close the if statement
+    # Fix the conditional block - echo the complete block rather than mixing echo with conditions
+    echo 'if not set -q WIREGUARD_IP'
+    echo '  set -gx WIREGUARD_IP "10.255.0.1"'
+    echo 'end'
     
     echo 'if not set -q CORE_POLICY_IN'
     echo '  set -gx CORE_POLICY_IN "ACCEPT"'

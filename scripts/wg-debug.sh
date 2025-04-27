@@ -230,7 +230,8 @@ echo "1) Restart WireGuard"
 echo "2) Restart Network"
 echo "3) Restart Firewall"
 echo "4) Exit"
-read -p "Enter choice (1-4): " quick_fix
+echo "$blue""Enter choice (1-4): ""$reset"
+read quick_fix
 
 switch $quick_fix
     case "1"

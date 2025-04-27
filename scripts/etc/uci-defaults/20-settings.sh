@@ -196,5 +196,63 @@ else
     end
 end
 
+# CRITICAL SECURITY FIX: Configure system services to bind only to internal interfaces
+echo "$red""CRITICAL: Securing service bindings to prevent WAN exposure...""$reset"
+
+# Configure uhttpd to bind only to internal interfaces
+if command -v uhttpd > /dev/null
+    echo "$blue""Configuring uhttpd to bind only to internal interfaces...""$reset"
+    
+    # Remove all existing listen_http and listen_https settings
+    uci -q delete uhttpd.main.listen_http
+    uci -q delete uhttpd.main.listen_https
+    
+    # Add listening only on internal interfaces
+    uci set uhttpd.main.listen_http='127.0.0.1:80 10.0.0.1:80 10.255.0.1:80'
+    uci set uhttpd.main.listen_https='127.0.0.1:443 10.0.0.1:443 10.255.0.1:443'
+    
+    echo "$green""Web server configured for security - now ONLY listening on internal interfaces""$reset"
+else
+    echo "$yellow""uhttpd not installed, skipping web interface binding configuration""$reset"
+end
+
+# Configure system SSH to bind only to internal interfaces
+if test -f /etc/ssh/sshd_config
+    echo "$blue""Configuring system SSH to bind only to internal interfaces...""$reset"
+    
+    # Back up the original file
+    cp -f /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+    
+    # Update the ListenAddress directive - remove any existing ones and add new ones
+    sed -i '/^ListenAddress/d' /etc/ssh/sshd_config
+    echo "ListenAddress 10.0.0.1" >> /etc/ssh/sshd_config
+    echo "ListenAddress 127.0.0.1" >> /etc/ssh/sshd_config
+    echo "ListenAddress 10.255.0.1" >> /etc/ssh/sshd_config
+    
+    # Ensure SSH service will restart
+    /etc/init.d/sshd enable
+    echo "$green""SSH server configured for security - now ONLY listening on internal interfaces""$reset"
+end
+
+# Configure ttyd (if installed) to bind only to internal interfaces
+if command -v ttyd > /dev/null
+    echo "$blue""Configuring ttyd to bind only to internal interfaces...""$reset"
+    
+    if test -f /etc/config/ttyd
+        # Configure through UCI
+        uci -q delete ttyd.@ttyd[0].interface
+        uci set ttyd.@ttyd[0].interface='10.0.0.1'
+        echo "$green""ttyd configured to bind only to 10.0.0.1""$reset"
+    else
+        # Create init script override using echo instead of heredoc (Fish does not support <<)
+        mkdir -p /etc/init.d/ttyd.d
+        echo '#!/bin/sh' > /etc/init.d/ttyd.d/bind_internal.sh
+        echo '# Force ttyd to bind only to internal interfaces' >> /etc/init.d/ttyd.d/bind_internal.sh
+        echo 'EXTRA_COMMANDS="-i 10.0.0.1"' >> /etc/init.d/ttyd.d/bind_internal.sh
+        chmod +x /etc/init.d/ttyd.d/bind_internal.sh
+        echo "$green""ttyd configured to bind only to internal interfaces through init script""$reset"
+    end
+end
+
 echo "$green""System settings configuration completed.""$reset"
 # Note: UCI commits are handled in 99-commit.sh

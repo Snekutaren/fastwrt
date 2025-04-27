@@ -160,7 +160,11 @@ function add_wireguard_peer
     uci add_list network.$section_name.allowed_ips="$client_ip/32"
     uci add_list network.$section_name.allowed_ips="0.0.0.0/0"
     uci set network.$section_name.description="$name"
+    
+    # Apply the persistent keepalive setting to ensure mobile connections stay active
     uci set network.$section_name.persistent_keepalive='25'
+    echo "$yellow""Set persistent keepalive to 25 seconds to maintain mobile connections""$reset"
+
     uci set network.$section_name.route_allowed_ips='1'
     
     # Add corresponding anonymous wireguard_wireguard section as seen in UCI output
@@ -266,3 +270,7 @@ echo "$blue""- Peers: ""$reset"(count_wireguard_peers)
 
 # Note: UCI commits are handled by the parent script
 echo "$green""WireGuard configuration changes complete. Changes will be applied during final commit.""$reset"
+
+# Enhanced mobile connectivity document reference
+echo "$blue""For mobile connectivity issues, see docs/WIREGUARD-CONNECTION.md""$reset"
+echo "$green""Use direct IP address (ssh root@$WIREGUARD_IP -p 6622) when connecting through mobile networks""$reset"

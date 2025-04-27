@@ -176,57 +176,116 @@ for i in (seq 0 (math $interface_counter - 1))
     uci set wireless.wifinet$i.macfilter='disable'
 end
 
-# Apply MAC addresses from maclist.csv if available
-# Test both that the variable exists AND that it has elements
-if set -q MAC_ADDRESSES; and test (count $MAC_ADDRESSES) -gt 0
-    echo "$blue""Adding "(count $MAC_ADDRESSES)" MAC addresses to wireless interfaces...""$reset"
-    
+# Apply MAC addresses from maclist.csv directly (same logic as in 40-dhcp.sh)
+set MACLIST_FILES "$PROFILE_DIR/maclist.csv" "$CONFIG_DIR/maclist.csv" "$BASE_DIR/maclist.csv"
+set MACLIST_PATH ""
+
+for file_path in $MACLIST_FILES
+    if test -f "$file_path"
+        set MACLIST_PATH "$file_path"
+        echo "$green""[Wireless] Found MAC list file at: $file_path""$reset"
+        break
+    end
+end
+
+set -l MAC_ADDRESSES
+if test -f "$MACLIST_PATH"
+    echo "$blue""[Wireless] Loading MAC addresses from maclist.csv...""$reset"
+    for line in (cat "$MACLIST_PATH")
+        set trimmed (string trim "$line")
+        if string match -q "#*" -- $trimmed; or test -z "$trimmed"
+            continue
+        end
+        set fields (string split "," -- $trimmed)
+        if test (count $fields) -lt 4
+            continue
+        end
+        set mac_addr (string trim "$fields[1]")
+        set device_name (string trim "$fields[3]")
+        set network_name (string trim "$fields[4]")
+        set -a MAC_ADDRESSES "$mac_addr:$device_name:$network_name"
+    end
+end
+
+set mac_count (count $MAC_ADDRESSES)
+echo "$yellow""DEBUG: MAC_ADDRESSES loaded from file with $mac_count entries:""$reset"
+for mac in $MAC_ADDRESSES
+    echo "$yellow""  $mac""$reset"
+end
+
+if test $mac_count -gt 0
+    echo "$blue""Adding $mac_count MAC addresses to wireless interfaces...""$reset"
     # Track which networks have had MAC addresses added and counts for verification
-    set mac_count_by_network
-    for i in (seq 0 (math $interface_counter - 1))
+    set -l mac_count_by_network
+    for i in (seq 1 $interface_counter)
         set mac_count_by_network[$i] 0
     end
-    
+
     # Process each MAC address entry
     for mac_entry in $MAC_ADDRESSES
         # Parse MAC entry (format: mac:device_name:network)
+        # Example: CC:28:AA:38:71:8D:rog-eth:core
         set mac_parts (string split ":" -- "$mac_entry")
         
-        # Validate that we have all parts to prevent errors
-        if test (count $mac_parts) -lt 3
-            echo "$yellow""Invalid MAC entry format: $mac_entry - skipping""$reset"
+        # Check if we have enough parts (at least 6 for MAC + 2 for name/network = 8)
+        if test (count $mac_parts) -lt 8
+            echo "$yellow""Invalid MAC entry format (too few parts): $mac_entry - skipping""$reset"
             continue
         end
-        
-        set mac_addr "$mac_parts[1]"
-        set device_name "$mac_parts[2]"
-        set network_name "$mac_parts[3]"
-        
-        # Validate MAC address to prevent errors
+
+        # Reconstruct the MAC address (first 6 parts)
+        set mac_addr (string join ":" $mac_parts[1..6])
+        # Get device name (7th part)
+        set device_name "$mac_parts[7]"
+        # Get network name (8th part)
+        set network_name "$mac_parts[8]"
+
+        # Validate the reconstructed MAC address
         if not string match -q -r '^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$' "$mac_addr"
-            echo "$yellow""Invalid MAC address format: $mac_addr - skipping""$reset"
+            echo "$yellow""Invalid MAC address format after reconstruction: $mac_addr (from $mac_entry) - skipping""$reset"
             continue
         end
-        
+
+        # Normalize network_name for matching (map SSID to network if needed)
+        set normalized_network (string lower "$network_name")
+        switch $normalized_network
+            case "closedwrt"
+                set normalized_network "core"
+            case "openwrt"
+                set normalized_network "guest"
+            case "iotwrt"
+                set normalized_network "iot"
+            case "metawrt"
+                set normalized_network "meta"
+            # Add cases for direct network names if needed
+            case "core" "guest" "iot" "meta" "nexus" "nodes"
+                # Keep as is
+                set normalized_network "$network_name"
+            case "*"
+                # Default case if network name is unexpected, maybe log a warning
+                echo "$yellow""Warning: Unrecognized network name '$network_name' in MAC entry: $mac_entry""$reset"
+                # Decide how to handle - skip or assign to a default? Skipping for safety.
+                continue
+        end
+
         # Add MAC to appropriate wireless interfaces based on network
-        for i in (seq 0 (math $interface_counter - 1))
-            set wifinet "wireless.wifinet$i"
+        for i in (seq 1 $interface_counter)
+            set wifinet_index (math $i - 1)
+            set wifinet "wireless.wifinet$wifinet_index"
             set wifi_network (uci -q get "$wifinet.network" 2>/dev/null)
-            
-            # Skip if we couldn't get the network
             if test -z "$wifi_network"
                 continue
             end
-            
-            # Either add to specific network or add to all networks if it's a core device
-            if test "$wifi_network" = "$network_name"; or test "$network_name" = "core"
+
+            # Compare using normalized network name
+            # Allow 'core' devices on all networks for simplicity, or match specific network
+            if test "$normalized_network" = "core"; or test "$wifi_network" = "$normalized_network"
                 echo "$blue""Adding MAC $mac_addr ($device_name) to $wifinet ($wifi_network)""$reset"
-                
-                # First check if this MAC is already in the list to maintain idempotency
                 set existing_macs (uci -q get "$wifinet.maclist" 2>/dev/null)
                 if string match -q "*$mac_addr*" "$existing_macs"
                     echo "$yellow""MAC $mac_addr already in list for $wifinet - skipping""$reset"
                 else
+                    # Use the validated mac_addr here
                     uci add_list "$wifinet.maclist=$mac_addr"
                     set mac_count_by_network[$i] (math $mac_count_by_network[$i] + 1)
                     echo "$green""Added MAC $mac_addr to $wifinet""$reset"
@@ -234,30 +293,34 @@ if set -q MAC_ADDRESSES; and test (count $MAC_ADDRESSES) -gt 0
             end
         end
     end
-    
+
     # Calculate total MACs added
     set total_mac_count 0
-    for i in (seq 0 (math $interface_counter - 1))
-        set total_mac_count (math $total_mac_count + $mac_count_by_network[$i])
+    for i in (seq 1 $interface_counter)
+        # Check if index exists before accessing
+        if test -n "$mac_count_by_network[$i]"
+            set total_mac_count (math $total_mac_count + $mac_count_by_network[$i])
+        end
     end
-    
+
     echo "$green""Added a total of $total_mac_count MAC address entries to wireless interfaces""$reset"
-    
+
     # Now enable MAC filtering if we have addresses and it's requested
     if test "$WIFI_MAC_FILTERING" = "allow"; or test "$WIFI_MAC_FILTERING" = "deny"
         # Verify each interface has MAC addresses before enabling filtering
-        for i in (seq 0 (math $interface_counter - 1))
-            set wifinet "wireless.wifinet$i"
-            
-            # Get MAC list count for this interface
-            set mac_list_count $mac_count_by_network[$i]
-            
+        for i in (seq 1 $interface_counter)
+            set wifinet_index (math $i - 1)
+            set wifinet "wireless.wifinet$wifinet_index"
+            # Check if index exists before accessing
+            set mac_list_count 0
+            if test -n "$mac_count_by_network[$i]"
+                set mac_list_count $mac_count_by_network[$i]
+            end
+
             if test "$WIFI_MAC_FILTERING" = "allow"; and test $mac_list_count -eq 0
-                # Safety feature: don't enable allow mode with no MACs - would lock everyone out
                 echo "$yellow""Warning: Not enabling 'allow' filtering for $wifinet - no MAC addresses added""$reset"
             else
-                # Safe to enable filtering
-                uci set wireless.wifinet$i.macfilter="$WIFI_MAC_FILTERING"
+                uci set $wifinet.macfilter="$WIFI_MAC_FILTERING"
                 echo "$green""Enabled $WIFI_MAC_FILTERING filtering for $wifinet with $mac_list_count MAC addresses""$reset"
             end
         end
@@ -266,11 +329,18 @@ if set -q MAC_ADDRESSES; and test (count $MAC_ADDRESSES) -gt 0
     end
 else
     echo "$yellow""No MAC addresses available for wireless filtering""$reset"
-    
-    # Verify that MAC filtering is properly disabled in this case
+    echo "$yellow""DEBUG: MAC_ADDRESSES is not set or empty at this point in 35-wireless.sh""$reset"
+    if test "$DEBUG" = "true"
+        set | grep MAC
+        env | grep MAC
+    end
+
     if test "$WIFI_MAC_FILTERING" = "allow"
         echo "$yellow""WARNING: MAC filtering set to 'allow' but no MAC addresses found.""$reset"
         echo "$yellow""Disabled MAC filtering to prevent lockout.""$reset"
+        for i in (seq 0 (math $interface_counter - 1))
+            uci set wireless.wifinet$i.macfilter='disable'
+        end
     end
 end
 
