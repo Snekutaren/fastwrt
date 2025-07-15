@@ -13,7 +13,7 @@ FastWrt is an **idempotent automation framework for OpenWrt**, engineered to pro
    ✅ *Same result on every run, every device.*
 
 2. **Modular architecture**  
-   The framework is structured into **dedicated modules** for each functional area (VLANs, interfaces, firewall, SSH, VPN preparation, certificates). This improves maintainability, readability, and scalability for future expansion.
+   The framework is structured into **dedicated modules** for each functional area (VLANs, interfaces, DHCP, firewall, SSH, VPN preparation, certificates). This improves maintainability, readability, and scalability for future expansion.
 
 3. **Explicit configuration-driven deployment**  
    All settings derive directly from structured configuration definitions within the script or external config files, ensuring clarity and auditability.
