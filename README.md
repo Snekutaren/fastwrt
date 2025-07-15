@@ -94,4 +94,3 @@ This project is licensed under the [MIT License](LICENSE).
 ### 💡 **Summary**
 
 FastWrt is an advanced automation framework that combines **robustness, clarity, and operational safety** through true idempotence and modular architecture, enabling professional-grade OpenWrt deployments with minimal manual intervention.
-"""
